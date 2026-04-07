@@ -1,0 +1,26 @@
+meta {
+  name: Confluence API Collection
+  type: http
+}
+
+request {
+  name: Get Confluence Pages
+  method: GET
+  url: {{base_url}}/wiki/rest/api/content
+  headers {
+    Accept: application/json
+  }
+  auth {
+    mode: basic
+    basic {
+      username: {{username}}
+      password: {{api_token}}
+    }
+  }
+  params {
+    spaceKey: {{space_key}}
+    expand: body.storage,space,metadata.labels,ancestors,version
+    limit: 50
+    start: 0
+  }
+}

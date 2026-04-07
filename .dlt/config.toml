@@ -1,0 +1,9 @@
+# Confluence configuration
+[sources.confluence]
+base_url = "https://nged.atlassian.net"
+space_key = "HMPS"
+
+# AI configuration
+[ai]
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+generation_model = "microsoft/phi-2"
