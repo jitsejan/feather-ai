@@ -3,23 +3,8 @@ from dlt.sources.rest_api import rest_api_source
 from html import unescape
 import logging
 import re
-import sys
-
-# Suppress verbose logging from dlt and HTTP libraries
-logging.basicConfig(
-    level=logging.ERROR,
-    format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s'
-)
-
-# Suppress specific loggers
-logging.getLogger('dlt').setLevel(logging.ERROR)
-logging.getLogger('dlt.sources').setLevel(logging.ERROR)
-logging.getLogger('urllib3').setLevel(logging.ERROR)
-logging.getLogger('requests').setLevel(logging.ERROR)
-logging.getLogger('httpx').setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
 
 
 def confluence_storage_to_text(value):
