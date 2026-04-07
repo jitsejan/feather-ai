@@ -5,12 +5,16 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 
+PAGES_TABLE = "confluence_data.process_pages"
+EMBEDDINGS_TABLE = "confluence_data.page_embeddings"
+
+
 def load_embeddings(conn):
-    embeddings = conn.execute("SELECT page_id, embedding FROM page_embeddings").fetchall()
+    embeddings = conn.execute(f"SELECT page_id, embedding FROM {EMBEDDINGS_TABLE}").fetchall()
     return {pid: np.array(emb) for pid, emb in embeddings}
 
 def load_pages(conn):
-    pages = conn.execute("SELECT id, title, content FROM pages").fetchall()
+    pages = conn.execute(f"SELECT id, title, content FROM {PAGES_TABLE}").fetchall()
     return {pid: (title, content) for pid, title, content in pages}
 
 def find_relevant_pages(query_embedding, embeddings, top_k=5):

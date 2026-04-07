@@ -1,6 +1,8 @@
 import dlt
 from dlt.sources.rest_api import rest_api_source
+from html import unescape
 import logging
+import re
 import sys
 
 # Suppress verbose logging from dlt and HTTP libraries
@@ -18,6 +20,29 @@ logging.getLogger('httpx').setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
+
+
+def confluence_storage_to_text(value):
+    if not value:
+        return ""
+
+    text = value
+    # Preserve some structure before stripping tags.
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|h1|h2|h3|h4|h5|h6|li|tr|table|blockquote)>", "\n", text)
+    text = re.sub(r"(?i)</(td|th)>", "\t", text)
+    text = re.sub(r"(?i)<li[^>]*>", "- ", text)
+
+    # Remove all remaining tags, including Confluence namespaced tags.
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+
+    # Normalize whitespace without collapsing line boundaries entirely.
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+
+    return text.strip()
 
 @dlt.source
 def confluence_source():
@@ -39,11 +64,14 @@ def confluence_source():
                     "params": {
                         "spaceKey": dlt.config["sources.confluence.space_key"],
                         "expand": "body.storage,space,metadata.labels,ancestors,version",
-                        "limit": 2
+                        "limit": 100
                     },
                     "paginator": {
-                        "type": "json_link",
-                        "next_url_path": "_links/next"
+                        "type": "offset",
+                        "limit": 100,
+                        "offset_param": "start",
+                        "limit_param": "limit",
+                        "total_path": None
                     },
                     "data_selector": "results"
                 },
@@ -56,7 +84,7 @@ def confluence_source():
 
 
 # Define transformers as separate functions
-@dlt.transformer
+@dlt.transformer(primary_key="id", write_disposition="merge")
 def process_pages(page):
     # Process page data silently
     try:
@@ -88,9 +116,9 @@ def process_pages(page):
                     if isinstance(label, dict) and 'name' in label:
                         label_names.append(label['name'])
         
-        content = ''
+        content_html = ''
         if 'body' in page_dict and 'storage' in page_dict['body'] and 'value' in page_dict['body']['storage']:
-            content = page_dict['body']['storage']['value']
+            content_html = page_dict['body']['storage']['value']
         
         space_name = ''
         if 'space' in page_dict and 'name' in page_dict['space']:
@@ -107,7 +135,8 @@ def process_pages(page):
         yield {
             'id': page_dict['id'],
             'title': page_dict['title'],
-            'content': content,
+            'content': confluence_storage_to_text(content_html),
+            'content_html': content_html,
             'ancestors': ancestors,
             'parent_id': ancestors[-1]['id'] if ancestors else None,
             'space_key': dlt.config["sources.confluence.space_key"],
@@ -122,7 +151,7 @@ def process_pages(page):
         pass
 
 
-@dlt.transformer
+@dlt.transformer(primary_key=("page_id", "ancestor_id"), write_disposition="merge")
 def process_hierarchy(page):
     # Now receiving individual page objects, not a list
     try:
