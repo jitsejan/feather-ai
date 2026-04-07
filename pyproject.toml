@@ -1,0 +1,18 @@
+[project]
+name = "feather-ai"
+version = "0.1.0"
+description = "Local-first knowledge engine for Confluence data"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dlt[duckdb,parquet]",
+    "motherduck",
+    "requests",
+    "sentence-transformers",
+    "transformers",
+    "torch",
+    "accelerate",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = []
