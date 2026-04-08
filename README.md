@@ -14,8 +14,8 @@ FeatherAI is a local-first knowledge engine that ingests Confluence data, struct
    ```
 
 3. Configure your credentials and settings in `.dlt/secrets.toml` and `.dlt/config.toml`:
-   - Update `secrets.toml` with your Confluence API credentials and MotherDuck connection string
-   - Update `config.toml` with your Confluence instance URL, space key, and AI model preferences
+   - Copy `.dlt/secrets.toml.sample` to `.dlt/secrets.toml` and update it with your Confluence API credentials and MotherDuck connection string
+   - Update `config.toml` with your Confluence instance URL, space key, Confluence expand scope, and AI model preferences
 
 4. Extract data from Confluence and load into MotherDuck using dlt:
    ```bash
