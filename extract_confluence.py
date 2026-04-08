@@ -6,6 +6,8 @@ import re
 
 logger = logging.getLogger(__name__)
 
+PAGE_LIMIT = 100
+
 
 def confluence_storage_to_text(value):
     if not value:
@@ -29,10 +31,48 @@ def confluence_storage_to_text(value):
 
     return text.strip()
 
+
+def extract_ancestors(page):
+    return [
+        {"id": ancestor["id"], "title": ancestor["title"]}
+        for ancestor in page.get("ancestors", [])
+        if isinstance(ancestor, dict) and ancestor.get("id") and ancestor.get("title")
+    ]
+
+
+def extract_labels(page):
+    results = page.get("metadata", {}).get("labels", {}).get("results", [])
+    return [
+        label["name"]
+        for label in results
+        if isinstance(label, dict) and label.get("name")
+    ]
+
+
+def build_page_record(page):
+    ancestors = extract_ancestors(page)
+    content_html = page.get("body", {}).get("storage", {}).get("value", "")
+    version = page.get("version", {})
+
+    return {
+        "id": page["id"],
+        "title": page["title"],
+        "content": confluence_storage_to_text(content_html),
+        "content_html": content_html,
+        "ancestors": ancestors,
+        "parent_id": ancestors[-1]["id"] if ancestors else None,
+        "space_key": dlt.config["sources.confluence.space_key"],
+        "space_name": page.get("space", {}).get("name", ""),
+        "labels": extract_labels(page),
+        "version": version.get("number", 0),
+        "created": version.get("when", ""),
+        "updated": version.get("when", ""),
+    }
+
+
 @dlt.source
 def confluence_source():
-    # Define the pages resource with minimal verbosity
-    pages_resource = rest_api_source({
+    return rest_api_source({
         "client": {
             "base_url": dlt.config["sources.confluence.base_url"],
             "auth": {
@@ -48,12 +88,12 @@ def confluence_source():
                     "path": "/wiki/rest/api/content",
                     "params": {
                         "spaceKey": dlt.config["sources.confluence.space_key"],
-                        "expand": "body.storage,space,metadata.labels,ancestors,version",
-                        "limit": 100
+                        "expand": dlt.config["sources.confluence.expand"],
+                        "limit": PAGE_LIMIT
                     },
                     "paginator": {
                         "type": "offset",
-                        "limit": 100,
+                        "limit": PAGE_LIMIT,
                         "offset_param": "start",
                         "limit_param": "limit",
                         "total_path": None
@@ -65,103 +105,29 @@ def confluence_source():
         ]
     }).pages
 
-    return pages_resource
 
-
-# Define transformers as separate functions
 @dlt.transformer(primary_key="id", write_disposition="merge")
 def process_pages(page):
-    # Process page data silently
     try:
-        # Convert PageData to dict if needed
-        if hasattr(page, '__dict__'):
-            page_dict = vars(page)
-        elif hasattr(page, 'items'):
-            page_dict = dict(page)
-        elif isinstance(page, str):
-            # If it's a string, try to parse it as JSON
-            import json
-            page_dict = json.loads(page)
-        else:
-            logger.error(f"Unexpected page type: {type(page)}")
-            return
-        
-        # Access fields using dict
-        ancestors = []
-        if 'ancestors' in page_dict:
-            for a in page_dict['ancestors']:
-                if isinstance(a, dict) and 'id' in a and 'title' in a:
-                    ancestors.append({'id': a['id'], 'title': a['title']})
-        
-        label_names = []
-        if 'metadata' in page_dict and 'labels' in page_dict['metadata']:
-            labels_obj = page_dict['metadata']['labels']
-            if isinstance(labels_obj, dict) and 'results' in labels_obj:
-                for label in labels_obj['results']:
-                    if isinstance(label, dict) and 'name' in label:
-                        label_names.append(label['name'])
-        
-        content_html = ''
-        if 'body' in page_dict and 'storage' in page_dict['body'] and 'value' in page_dict['body']['storage']:
-            content_html = page_dict['body']['storage']['value']
-        
-        space_name = ''
-        if 'space' in page_dict and 'name' in page_dict['space']:
-            space_name = page_dict['space']['name']
-        
-        version_number = 0
-        version_when = ''
-        if 'version' in page_dict:
-            if 'number' in page_dict['version']:
-                version_number = page_dict['version']['number']
-            if 'when' in page_dict['version']:
-                version_when = page_dict['version']['when']
-        
-        yield {
-            'id': page_dict['id'],
-            'title': page_dict['title'],
-            'content': confluence_storage_to_text(content_html),
-            'content_html': content_html,
-            'ancestors': ancestors,
-            'parent_id': ancestors[-1]['id'] if ancestors else None,
-            'space_key': dlt.config["sources.confluence.space_key"],
-            'space_name': space_name,
-            'labels': label_names,
-            'version': version_number,
-            'created': version_when,
-            'updated': version_when
-        }
-    except Exception as e:
-        logger.error(f"Error processing page: {e}")
-        pass
+        yield build_page_record(dict(page))
+    except Exception as exc:
+        logger.error("Error processing page: %s", exc)
 
 
 @dlt.transformer(primary_key=("page_id", "ancestor_id"), write_disposition="merge")
 def process_hierarchy(page):
-    # Now receiving individual page objects, not a list
     try:
-        # Convert PageData to dict if needed
-        if hasattr(page, '__dict__'):
-            page_dict = vars(page)
-        elif hasattr(page, 'items'):
-            page_dict = dict(page)
-        elif isinstance(page, str):
-            # If it's a string, try to parse it as JSON
-            import json
-            page_dict = json.loads(page)
-        else:
-            return
-        
-        ancestors = page_dict.get('ancestors', [])
-        page_id = page_dict['id']
-        
-        for level, ancestor in enumerate(ancestors):
-            if isinstance(ancestor, dict) and 'id' in ancestor:
-                yield {
-                    "page_id": page_id,
-                    "ancestor_id": ancestor['id'],
-                    "level": level + 1
-                }
-    except Exception as e:
-        logger.error(f"Error processing hierarchy: {e}")
-        pass
+        page = dict(page)
+        page_id = page["id"]
+
+        for level, ancestor in enumerate(page.get("ancestors", []), start=1):
+            if not isinstance(ancestor, dict) or not ancestor.get("id"):
+                continue
+
+            yield {
+                "page_id": page_id,
+                "ancestor_id": ancestor["id"],
+                "level": level,
+            }
+    except Exception as exc:
+        logger.error("Error processing hierarchy: %s", exc)
