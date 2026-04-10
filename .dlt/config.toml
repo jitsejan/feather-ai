@@ -1,8 +1,11 @@
-# Confluence configuration
-[sources.confluence]
+# Confluence configuration (official namespace)
+[sources.atlassian_confluence]
 base_url = "https://nged.atlassian.net"
 space_key = "HMPS"
 expand = "body.storage,space,metadata.labels,ancestors,version"
+
+# Legacy namespace still supported as fallback:
+# [sources.confluence]
 
 # AI configuration
 [ai]
