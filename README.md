@@ -15,12 +15,16 @@ FeatherAI is a local-first knowledge engine that ingests Confluence data, struct
 
 3. Configure your credentials and settings in `.dlt/secrets.toml` and `.dlt/config.toml`:
    - Copy `.dlt/secrets.toml.sample` to `.dlt/secrets.toml` and update it with your Confluence API credentials and MotherDuck connection string
+   - Use the official dlt-style source namespace: `[sources.atlassian_confluence]`
    - Update `config.toml` with your Confluence instance URL, space key, Confluence expand scope, and AI model preferences
 
 4. Extract data from Confluence and load into MotherDuck using dlt:
    ```bash
    uv run python store_in_duckdb.py
    ```
+   This project uses dlt's official REST source pattern (`RESTAPIConfig` + `rest_api_resources`)
+   with a dedicated `atlassian_confluence_source` entrypoint so it remains easy to extend with
+   additional Confluence endpoints.
 
 5. Generate embeddings:
    ```bash
