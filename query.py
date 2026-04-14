@@ -2,28 +2,28 @@ import dlt
 import duckdb
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
-PAGES_TABLE = "confluence_data.process_pages"
-EMBEDDINGS_TABLE = "confluence_data.page_embeddings"
+CHUNKS_TABLE = "analytics.fct_confluence_chunks"
+EMBEDDINGS_TABLE = "analytics.chunk_embeddings"
 
 
 def load_embeddings(conn):
-    embeddings = conn.execute(f"SELECT page_id, embedding FROM {EMBEDDINGS_TABLE}").fetchall()
-    return {pid: np.array(emb) for pid, emb in embeddings}
+    embeddings = conn.execute(f"SELECT chunk_id, embedding FROM {EMBEDDINGS_TABLE}").fetchall()
+    return {chunk_id: np.array(emb) for chunk_id, emb in embeddings}
 
-def load_pages(conn):
-    pages = conn.execute(f"SELECT id, title, content FROM {PAGES_TABLE}").fetchall()
-    return {pid: (title, content) for pid, title, content in pages}
+def load_chunks(conn):
+    chunks = conn.execute(f"SELECT chunk_id, title, chunk_text FROM {CHUNKS_TABLE}").fetchall()
+    return {chunk_id: (title, chunk_text) for chunk_id, title, chunk_text in chunks}
 
-def find_relevant_pages(query_embedding, embeddings, top_k=5):
+def find_relevant_chunks(query_embedding, embeddings, top_k=5):
     similarities = {}
-    for pid, emb in embeddings.items():
+    for chunk_id, emb in embeddings.items():
         sim = np.dot(query_embedding, emb) / (np.linalg.norm(query_embedding) * np.linalg.norm(emb))
-        similarities[pid] = sim
-    sorted_pages = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
-    return sorted_pages[:top_k]
+        similarities[chunk_id] = sim
+    sorted_chunks = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
+    return sorted_chunks[:top_k]
 
 def generate_answer(question, context, tokenizer, model):
     prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
@@ -39,11 +39,11 @@ def query(question):
 
     conn = duckdb.connect(dlt.secrets["destination.duckdb.credentials"])
     embeddings = load_embeddings(conn)
-    pages = load_pages(conn)
+    chunks = load_chunks(conn)
     conn.close()
 
-    relevant = find_relevant_pages(query_emb, embeddings)
-    context = "\n\n".join([f"Title: {pages[pid][0]}\nContent: {pages[pid][1]}" for pid, _ in relevant])
+    relevant = find_relevant_chunks(query_emb, embeddings)
+    context = "\n\n".join([f"Title: {chunks[chunk_id][0]}\nContent: {chunks[chunk_id][1]}" for chunk_id, _ in relevant])
 
     tokenizer = AutoTokenizer.from_pretrained(dlt.config["ai.generation_model"])
     model_gen = AutoModelForCausalLM.from_pretrained(dlt.config["ai.generation_model"], torch_dtype=torch.float16, device_map="auto")

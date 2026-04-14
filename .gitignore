@@ -34,3 +34,9 @@ models/
 
 # Bruno environment (contains sensitive data)
 bruno-environment.json
+
+# dbt artifacts
+dbt/target/
+dbt/logs/
+dbt/packages/
+dbt/profiles.yml
