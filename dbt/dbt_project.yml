@@ -1,0 +1,27 @@
+name: feather_ai
+version: 1.0.0
+config-version: 2
+
+profile: feather_ai
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  feather_ai:
+    +materialized: view
+    staging:
+      +schema: stg_confluence
+    intermediate:
+      +schema: int_confluence
+    marts:
+      +schema: analytics
+      +materialized: table
