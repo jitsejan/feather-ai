@@ -1,0 +1,8 @@
+feather_ai:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('MOTHERDUCK_CONNECTION_STRING') }}"
+      schema: raw_confluence
+      threads: 4

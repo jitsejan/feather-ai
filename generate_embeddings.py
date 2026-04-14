@@ -1,30 +1,31 @@
 import dlt
 from sentence_transformers import SentenceTransformer
-import numpy as np
 
-PAGES_TABLE = "confluence_data.process_pages"
-EMBEDDINGS_TABLE = "confluence_data.page_embeddings"
+CHUNKS_TABLE = "analytics.fct_confluence_chunks"
+EMBEDDINGS_TABLE = "analytics.chunk_embeddings"
 
 
 def generate_embeddings(conn, model):
-    # Get all pages
-    pages = conn.execute(f"SELECT id, title, content FROM {PAGES_TABLE}").fetchall()
+    chunks = conn.execute(
+        f"SELECT chunk_id, title, chunk_text FROM {CHUNKS_TABLE}"
+    ).fetchall()
     embeddings = []
-    for page_id, title, content in pages:
-        text = f"{title}\n{content}"
+    for chunk_id, title, chunk_text in chunks:
+        text = f"{title}\n{chunk_text}"
         embedding = model.encode(text)
-        embeddings.append((page_id, embedding.tolist()))
+        embeddings.append((chunk_id, embedding.tolist()))
     return embeddings
 
 def store_embeddings(conn, embeddings):
     conn.execute(f"""
     CREATE TABLE IF NOT EXISTS {EMBEDDINGS_TABLE} (
-        page_id VARCHAR REFERENCES {PAGES_TABLE}(id),
+        chunk_id VARCHAR REFERENCES {CHUNKS_TABLE}(chunk_id),
         embedding FLOAT[]
     )
     """)
-    for page_id, emb in embeddings:
-        conn.execute(f"INSERT INTO {EMBEDDINGS_TABLE} VALUES (?, ?)", (page_id, emb))
+    conn.execute(f"DELETE FROM {EMBEDDINGS_TABLE}")
+    for chunk_id, emb in embeddings:
+        conn.execute(f"INSERT INTO {EMBEDDINGS_TABLE} VALUES (?, ?)", (chunk_id, emb))
 
 if __name__ == "__main__":
     import duckdb

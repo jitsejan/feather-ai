@@ -51,7 +51,7 @@ def _build_pipeline(refresh=None):
     pipeline = dlt.pipeline(
         pipeline_name="confluence_to_motherduck",
         destination=destination,
-        dataset_name="confluence_data",
+        dataset_name="raw_confluence",
         refresh=refresh,
     )
 
@@ -83,11 +83,12 @@ def _run_pipeline(refresh=None):
     return pipeline
 
 
-def create_pipeline():
+def create_pipeline(drop_existing: bool = False):
     logger.info("Starting Confluence extraction")
 
     try:
-        pipeline = _run_pipeline()
+        refresh_mode = "drop_resources" if drop_existing else None
+        pipeline = _run_pipeline(refresh=refresh_mode)
     except Exception as e:
         message = str(e)
         if "Adding columns with constraints not yet supported" in message:
@@ -118,9 +119,14 @@ def _parse_args():
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="dlt/internal library log level",
     )
+    parser.add_argument(
+        "--drop-existing",
+        action="store_true",
+        help="Drop existing raw resources before loading",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = _parse_args()
     configure_logging(log_level=args.log_level, dlt_log_level=args.dlt_log_level)
-    create_pipeline()
+    create_pipeline(drop_existing=args.drop_existing)
