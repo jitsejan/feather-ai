@@ -56,3 +56,30 @@ FeatherAI ingests Confluence data into MotherDuck with `dlt` and enforces a dbt 
    ```bash
    uv run python query.py
    ```
+
+## Dagster orchestration (dlt -> dbt run -> dbt test)
+
+Dagster integration is native on both sides:
+- `dagster-dlt` (`@dlt_assets`) for Confluence ingestion assets
+- `dagster-dbt` (`@dbt_assets`) for dbt models/tests with lineage and asset checks
+
+Run the Dagster UI with repository definitions:
+
+```bash
+uv run dagster dev -f orchestration/definitions.py
+```
+
+Then materialize assets in order:
+- `confluence_raw_ingest`
+- `dbt_run_models`
+- `dbt_test_models`
+
+Or launch the job directly:
+
+```bash
+uv run dagster job execute -f orchestration/definitions.py -j confluence_dlt_dbt_job
+```
+
+Optional env vars:
+- `DAGSTER_DLT_DROP_EXISTING=true` to force raw recrawl
+- `DAGSTER_LOG_LEVEL=DEBUG` for verbose ingestion logs

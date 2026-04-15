@@ -5,6 +5,10 @@ description = "Local-first knowledge engine for Confluence data"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "dagster",
+    "dagster-dbt",
+    "dagster-dlt",
+    "dagster-webserver",
     "dlt[duckdb,parquet]",
     "dbt-duckdb",
     "motherduck",
