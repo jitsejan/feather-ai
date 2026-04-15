@@ -40,3 +40,8 @@ dbt/target/
 dbt/logs/
 dbt/packages/
 dbt/profiles.yml
+dbt/.user.yml
+
+# Dagster local state
+.dagster/
+.tmp_dagster_home_*/
