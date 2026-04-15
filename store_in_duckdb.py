@@ -62,22 +62,28 @@ def _build_pipeline(refresh=None):
     return pipeline
 
 
-def _run_pipeline(refresh=None):
-    pipeline = _build_pipeline(refresh=refresh)
+def build_pipeline(refresh=None):
+    """Public pipeline factory for orchestrators (Dagster, scripts)."""
+    return _build_pipeline(refresh=refresh)
 
-    # Get the raw pages resource from the official-style source entrypoint.
+
+@dlt.source
+def confluence_processed_source():
+    """Expose processed Confluence resources as a dlt source."""
     source = atlassian_confluence_source()
     pages_resource = source.pages
-
-    # Apply transformers
     from extract_confluence import process_pages, process_hierarchy
-    process_pages_resource = pages_resource | process_pages
-    process_hierarchy_resource = pages_resource | process_hierarchy
+    return pages_resource | process_pages, pages_resource | process_hierarchy
+
+
+def _run_pipeline(refresh=None):
+    pipeline = build_pipeline(refresh=refresh)
+    processed_source = confluence_processed_source()
 
     # Load all derived resources in one dlt run so extraction happens once.
     logger.info("Loading pages and hierarchy")
     with contextlib.redirect_stdout(StringIO()), contextlib.redirect_stderr(StringIO()):
-        load_info = pipeline.run([process_pages_resource, process_hierarchy_resource], refresh=refresh)
+        load_info = pipeline.run(processed_source, refresh=refresh)
     logger.info("Load info: %s", load_info)
 
     return pipeline
