@@ -1,9 +1,11 @@
 import dlt
-import requests
 from collections.abc import Mapping
 from html import unescape
 import logging
 import re
+from dlt.sources.helpers.rest_client import RESTClient
+from dlt.sources.helpers.rest_client.auth import HttpBasicAuth
+from dlt.sources.helpers.rest_client.paginators import OffsetPaginator
 
 logger = logging.getLogger(__name__)
 
@@ -166,24 +168,26 @@ def build_page_record(page):
 
 @dlt.resource(name="pages", write_disposition="replace")
 def _confluence_pages(base_url: str, space_key: str, expand: str):
-    """Paginate through all Confluence pages in a space using plain requests."""
+    """Paginate through all Confluence pages in a space using dlt RESTClient."""
     username = dlt.secrets["sources.atlassian_confluence.username"]
     password = dlt.secrets["sources.atlassian_confluence.password"]
-    start = 0
-    while True:
-        response = requests.get(
-            f"{base_url}/wiki/rest/api/content",
-            params={"spaceKey": space_key, "expand": expand, "limit": PAGE_LIMIT, "start": start},
-            auth=(username, password),
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        results = data.get("results", [])
-        yield from results
-        if len(results) < PAGE_LIMIT:
-            break
-        start += PAGE_LIMIT
+    client = RESTClient(
+        base_url=f"{base_url}/wiki/rest/api",
+        auth=HttpBasicAuth(username, password),
+        paginator=OffsetPaginator(
+            limit=PAGE_LIMIT,
+            offset_param="start",
+            limit_param="limit",
+            total_path=None,
+            stop_after_empty_page=True,
+        ),
+    )
+    for page in client.paginate(
+        "content",
+        params={"spaceKey": space_key, "expand": expand},
+        data_selector="results",
+    ):
+        yield from page
 
 
 @dlt.source
