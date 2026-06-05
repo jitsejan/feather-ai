@@ -7,11 +7,12 @@ from io import StringIO
 
 logger = logging.getLogger(__name__)
 
+from dlt.destinations import duckdb
+
 try:
     from dlt.destinations import motherduck
     MOTHERDUCK_AVAILABLE = True
 except ImportError:
-    from dlt.destinations import duckdb
     MOTHERDUCK_AVAILABLE = False
 from extract_confluence import atlassian_confluence_source
 
@@ -39,27 +40,34 @@ def configure_logging(log_level: str = "INFO", dlt_log_level: str = "WARNING") -
         logging.getLogger(logger_name).setLevel(noisy_level)
 
 
+def _duckdb_credentials() -> str:
+    """Return credentials string, falling back to a space-key-derived filename."""
+    with contextlib.suppress(KeyError):
+        return dlt.secrets["destination.duckdb.credentials"]
+    space_key = dlt.config.get("sources.atlassian_confluence.space_key", "confluence")
+    return f"{space_key.lower()}.duckdb"
+
+
+def _use_motherduck() -> bool:
+    return MOTHERDUCK_AVAILABLE and _duckdb_credentials().startswith("md:")
+
+
 def _build_pipeline(refresh=None):
     logger.debug("Building pipeline with refresh=%s", refresh)
-    if MOTHERDUCK_AVAILABLE:
+    credentials = _duckdb_credentials()
+    if _use_motherduck():
         logger.debug("Using motherduck destination")
-        destination = motherduck(dlt.secrets["destination.duckdb.credentials"])
+        destination = motherduck(credentials)
     else:
-        logger.debug("Using duckdb destination")
-        destination = duckdb()
+        logger.debug("Using local duckdb destination: %s", credentials)
+        destination = duckdb(credentials)
 
-    pipeline = dlt.pipeline(
+    return dlt.pipeline(
         pipeline_name="confluence_to_motherduck",
         destination=destination,
         dataset_name="raw_confluence",
         refresh=refresh,
     )
-
-    # If using regular duckdb, set the connection string
-    if not MOTHERDUCK_AVAILABLE:
-        pipeline.destination.credentials = dlt.secrets["destination.duckdb.credentials"]
-
-    return pipeline
 
 
 def build_pipeline(refresh=None):

@@ -1,5 +1,5 @@
 import dlt
-from dlt.sources.rest_api import RESTAPIConfig, rest_api_resources
+import requests
 from collections.abc import Mapping
 from html import unescape
 import logging
@@ -164,54 +164,40 @@ def build_page_record(page):
     }
 
 
+@dlt.resource(name="pages", write_disposition="replace")
+def _confluence_pages(base_url: str, space_key: str, expand: str):
+    """Paginate through all Confluence pages in a space using plain requests."""
+    username = dlt.secrets["sources.atlassian_confluence.username"]
+    password = dlt.secrets["sources.atlassian_confluence.password"]
+    start = 0
+    while True:
+        response = requests.get(
+            f"{base_url}/wiki/rest/api/content",
+            params={"spaceKey": space_key, "expand": expand, "limit": PAGE_LIMIT, "start": start},
+            auth=(username, password),
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        results = data.get("results", [])
+        yield from results
+        if len(results) < PAGE_LIMIT:
+            break
+        start += PAGE_LIMIT
+
+
 @dlt.source
 def atlassian_confluence_source(
     base_url=None,
     space_key=None,
     expand=None,
-    username=None,
-    password=None,
 ):
-    """dlt-style Confluence source using RESTAPIConfig/rest_api_resources."""
+    """dlt Confluence source using plain requests for reliable Basic Auth."""
     base_url = base_url or dlt.config["sources.atlassian_confluence.base_url"]
     space_key = space_key or dlt.config["sources.atlassian_confluence.space_key"]
     expand = expand or dlt.config["sources.atlassian_confluence.expand"]
-    username = username or dlt.secrets["sources.atlassian_confluence.username"]
-    password = password or dlt.secrets["sources.atlassian_confluence.password"]
 
-    config: RESTAPIConfig = {
-        "client": {
-            "base_url": base_url,
-            "auth": {
-                "type": "http_basic",
-                "username": username,
-                "password": password,
-            },
-        },
-        "resources": [
-            {
-                "name": "pages",
-                "endpoint": {
-                    "path": "/wiki/rest/api/content",
-                    "params": {
-                        "spaceKey": space_key,
-                        "expand": expand,
-                        "limit": PAGE_LIMIT,
-                    },
-                    "paginator": {
-                        "type": "offset",
-                        "limit": PAGE_LIMIT,
-                        "offset_param": "start",
-                        "limit_param": "limit",
-                        "total_path": None,
-                    },
-                    "data_selector": "results",
-                },
-                "write_disposition": "replace",
-            }
-        ],
-    }
-    yield from rest_api_resources(config)
+    yield _confluence_pages(base_url, space_key, expand)
 
 
 def confluence_source():
