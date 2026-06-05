@@ -1,11 +1,14 @@
 # Confluence configuration (official namespace)
 [sources.atlassian_confluence]
-base_url = "https://orbisinvestments.atlassian.net"
 space_key = "INT"
 expand = "body.storage,space,metadata.labels,ancestors,version"
 
 # Legacy namespace still supported as fallback:
 # [sources.confluence]
+
+# Jira configuration
+[sources.jira]
+board_id = 668
 
 # AI configuration
 [ai]
