@@ -45,3 +45,6 @@ dbt/.user.yml
 # Dagster local state
 .dagster/
 .tmp_dagster_home_*/
+
+
+*.duckdb
