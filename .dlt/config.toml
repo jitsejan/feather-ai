@@ -1,7 +1,7 @@
 # Confluence configuration (official namespace)
 [sources.atlassian_confluence]
 base_url = "https://yourcompany.atlassian.net"
-space_key = "HMPS"
+space_key = "INT"
 expand = "body.storage,space,metadata.labels,ancestors,version"
 
 # Legacy namespace still supported as fallback:
