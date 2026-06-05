@@ -1,0 +1,13 @@
+# This file is an example only — it is not used by the pipeline.
+#
+# Projects are configured entirely in .dlt/secrets.toml under [projects.<name>].
+# No project-specific files should be committed to this directory.
+#
+# Example secrets.toml entry:
+#
+# [projects.mycompany]
+# base_url             = "https://mycompany.atlassian.net"
+# username             = "your.email@mycompany.com"
+# password             = "YOUR_ATLASSIAN_API_TOKEN"
+# confluence_space_key = "ENG"
+# jira_board_id        = 42
