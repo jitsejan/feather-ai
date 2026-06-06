@@ -17,6 +17,8 @@ dependencies = [
     "transformers",
     "torch",
     "accelerate",
+    "html2text>=2025.4.15",
+    "markdownify>=1.2.2",
 ]
 
 [tool.hatch.build.targets.wheel]
