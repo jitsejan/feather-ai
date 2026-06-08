@@ -10,6 +10,9 @@ Confluence pages are written to:
 Jira issues are written to:
     <OBSIDIAN_VAULT>/current-work/<project_path>/jira/<issue_key>.md
 
+Weekly dashboard note is written to:
+    <OBSIDIAN_VAULT>/current-work/weekly/YYYY-Www.md
+
 Project-to-vault-path mapping is defined in VAULT_PATHS below.
 """
 import os
@@ -17,6 +20,7 @@ import re
 import dlt
 import duckdb
 import requests
+from datetime import date
 from markdownify import markdownify
 from requests.auth import HTTPBasicAuth
 
@@ -24,9 +28,15 @@ from project_config import load_all_projects, ProjectConfig
 
 MOTHERDUCK_DB = "feather_ai"
 OBSIDIAN_VAULT = "/Users/jitsejan/Documents/VAULT"
+MY_NAME = "REDACTED"
 
 VAULT_PATHS = {
     "nged": "current-work/REDACTED/REDACTED",
+    REDACTED,
+}
+
+PROJECT_LABELS = {
+    "nged": "REDACTED",
     REDACTED,
 }
 
@@ -338,6 +348,98 @@ def export_jira(con, project: ProjectConfig, vault_path: str):
     print(f"  jira: {len(issues)} issues written")
 
 
+def generate_weekly_note(con, projects: list):
+    today = date.today()
+    week_str = today.strftime("%Y-W%V")  # e.g. 2026-W24
+    folder = os.path.join(OBSIDIAN_VAULT, "current-work", "weekly")
+    os.makedirs(folder, exist_ok=True)
+    filepath = os.path.join(folder, f"{week_str}.md")
+
+    # Collect data per project
+    project_data = []
+    for project in projects:
+        dataset = project.jira_dataset
+        label = PROJECT_LABELS.get(project.name, project.name)
+
+        try:
+            # Active sprint issues (scrum) or active status (kanban)
+            active_issues = con.execute(f"""
+                SELECT key, summary, status, assignee, priority, parent_key, sprint_name
+                FROM {dataset}.process_issues
+                WHERE sprint_state = 'active'
+                   OR (sprint_name IS NULL AND status_category = 'In Progress')
+                ORDER BY assignee, status
+            """).fetchall()
+
+            sprint_name = next(
+                (r[6] for r in active_issues if r[6]),
+                "Kanban"
+            )
+
+            project_data.append({
+                "label": label,
+                "name": project.name,
+                "sprint": sprint_name,
+                "issues": active_issues,
+            })
+        except Exception as e:
+            project_data.append({
+                "label": label,
+                "name": project.name,
+                "sprint": None,
+                "issues": [],
+                "error": str(e),
+            })
+
+    with open(filepath, "w") as f:
+        f.write(f"---\n")
+        f.write(f"date: {today.isoformat()}\n")
+        f.write(f"week: {week_str}\n")
+        f.write(f"---\n\n")
+        f.write(f"# Week {week_str}\n\n")
+
+        # Section 1: My tickets across all projects
+        f.write(f"## 🔴 My tickets\n\n")
+        has_my_tickets = False
+        for pd in project_data:
+            my_issues = [r for r in pd["issues"] if r[3] == MY_NAME]
+            if not my_issues:
+                continue
+            has_my_tickets = True
+            sprint_label = pd["sprint"] or "Kanban"
+            f.write(f"### {pd['label']} — {sprint_label}\n\n")
+            f.write("| Key | Summary | Status | Priority |\n")
+            f.write("|-----|---------|--------|----------|\n")
+            for key, summary, status, assignee, priority, parent_key, sprint_name in my_issues:
+                parent = f" _(↑ [[{parent_key}]])_" if parent_key else ""
+                f.write(f"| [[{key}]] | {summary}{parent} | {status} | {priority} |\n")
+            f.write("\n")
+        if not has_my_tickets:
+            f.write(f"_No tickets assigned to {MY_NAME} in active sprints._\n\n")
+
+        # Section 2: Full active sprint per project
+        f.write(f"## 📋 Active sprints\n\n")
+        for pd in project_data:
+            sprint_label = pd["sprint"] or "Kanban"
+            total = len(pd["issues"])
+            f.write(f"### {pd['label']} — {sprint_label} ({total} issues)\n\n")
+
+            if not pd["issues"]:
+                f.write("_No active issues._\n\n")
+                continue
+
+            f.write("| Key | Summary | Assignee | Status |\n")
+            f.write("|-----|---------|----------|--------|\n")
+            for key, summary, status, assignee, priority, parent_key, sprint_name in pd["issues"]:
+                assignee_short = assignee.split()[0] if assignee else "—"
+                bold_open = "**" if assignee == MY_NAME else ""
+                bold_close = "**" if assignee == MY_NAME else ""
+                f.write(f"| {bold_open}[[{key}]]{bold_close} | {bold_open}{summary}{bold_close} | {assignee_short} | {status} |\n")
+            f.write("\n")
+
+    print(f"  weekly note: {filepath}")
+
+
 def main():
     credentials = dlt.secrets["destination.motherduck.credentials"]
     con = duckdb.connect(credentials)
@@ -352,6 +454,9 @@ def main():
         print(f"Exporting {project.name}...")
         export_confluence(con, project, vault_path)
         export_jira(con, project, vault_path)
+
+    print("Generating weekly note...")
+    generate_weekly_note(con, projects)
 
     print("Done.")
 
