@@ -67,14 +67,16 @@ def _confluence_processed(project: ProjectConfig):
         base_url=project.base_url,
         space_key=project.confluence_space_key,
         expand=project.confluence_expand,
-        username=project.username,
-        password=project.password,
     ).pages
     return pages | process_pages, pages | process_hierarchy
 
 
 def run_confluence(project: ProjectConfig, drop_existing: bool = False) -> None:
     logger.info("[%s] Starting Confluence ingestion", project.name)
+    # Inject per-project credentials as env vars so dlt secrets picks them up
+    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
+    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
+    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
     refresh = "drop_resources" if drop_existing else None
     pipeline = dlt.pipeline(
         pipeline_name=f"{project.name}_confluence",
@@ -96,14 +98,16 @@ def _jira_processed(project: ProjectConfig):
     issues = jira_source(
         base_url=project.base_url,
         board_id=project.jira_board_id,
-        username=project.username,
-        password=project.password,
     ).issues
     return issues | process_issues
 
 
 def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
     logger.info("[%s] Starting Jira ingestion", project.name)
+    # Inject per-project credentials as env vars so dlt secrets picks them up
+    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
+    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
+    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
     refresh = "drop_resources" if drop_existing else None
     pipeline = dlt.pipeline(
         pipeline_name=f"{project.name}_jira",
