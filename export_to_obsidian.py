@@ -376,11 +376,24 @@ def generate_weekly_note(con, projects: list):
                 "Kanban"
             )
 
+            # All tickets assigned to me (including backlog/to-do not in active sprint)
+            active_keys = {r[0] for r in active_issues}
+            my_all_issues = con.execute(f"""
+                SELECT key, summary, status, assignee, priority, parent_key, sprint_name
+                FROM {dataset}.process_issues
+                WHERE assignee = '{MY_NAME}'
+                  AND status_category != 'Done'
+                ORDER BY status_category, status
+            """).fetchall()
+            # Split: in active sprint (already covered) vs backlog/other
+            my_extra_issues = [r for r in my_all_issues if r[0] not in active_keys]
+
             project_data.append({
                 "label": label,
                 "name": project.name,
                 "sprint": sprint_name,
                 "issues": active_issues,
+                "my_extra_issues": my_extra_issues,
             })
         except Exception as e:
             project_data.append({
@@ -388,6 +401,7 @@ def generate_weekly_note(con, projects: list):
                 "name": project.name,
                 "sprint": None,
                 "issues": [],
+                "my_extra_issues": [],
                 "error": str(e),
             })
 
@@ -402,20 +416,25 @@ def generate_weekly_note(con, projects: list):
         f.write(f"## 🔴 My tickets\n\n")
         has_my_tickets = False
         for pd in project_data:
-            my_issues = [r for r in pd["issues"] if r[3] == MY_NAME]
-            if not my_issues:
+            my_active = [r for r in pd["issues"] if r[3] == MY_NAME]
+            my_extra = pd.get("my_extra_issues", [])
+            if not my_active and not my_extra:
                 continue
             has_my_tickets = True
             sprint_label = pd["sprint"] or "Kanban"
             f.write(f"### {pd['label']} — {sprint_label}\n\n")
             f.write("| Key | Summary | Status | Priority |\n")
             f.write("|-----|---------|--------|----------|\n")
-            for key, summary, status, assignee, priority, parent_key, sprint_name in my_issues:
+            for key, summary, status, assignee, priority, parent_key, sprint_name in my_active:
                 parent = f" _(↑ [[{parent_key}]])_" if parent_key else ""
                 f.write(f"| [[{key}]] | {summary}{parent} | {status} | {priority} |\n")
+            if my_extra:
+                for key, summary, status, assignee, priority, parent_key, sprint_name in my_extra:
+                    parent = f" _(↑ [[{parent_key}]])_" if parent_key else ""
+                    f.write(f"| [[{key}]] | {summary}{parent} | {status} _(backlog)_ | {priority} |\n")
             f.write("\n")
         if not has_my_tickets:
-            f.write(f"_No tickets assigned to {MY_NAME} in active sprints._\n\n")
+            f.write(f"_No tickets assigned to {MY_NAME}._\n\n")
 
         # Section 2: Full active sprint per project
         f.write(f"## 📋 Active sprints\n\n")
