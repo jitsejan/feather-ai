@@ -1,11 +1,12 @@
 """
-Single entrypoint for running Confluence and/or Jira ingestion
+Single entrypoint for running Confluence, Jira and ADO wiki ingestion
 for one or all configured projects.
 
 Usage:
-    python pipeline.py --project orbis
-    python pipeline.py --project orbis --source confluence
-    python pipeline.py --project orbis --source jira
+    python pipeline.py --project myproject
+    python pipeline.py --project myproject --source confluence
+    python pipeline.py --project myproject --source jira
+    python pipeline.py --project myproject --source ado_wiki
     python pipeline.py --all
     python pipeline.py --all --source confluence
 """
@@ -77,7 +78,6 @@ def run_confluence(project: ProjectConfig, drop_existing: bool = False) -> None:
         logger.info("[%s] No Confluence config — skipping", project.name)
         return
     logger.info("[%s] Starting Confluence ingestion", project.name)
-    # Inject per-project credentials as env vars so dlt secrets picks them up
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
@@ -111,7 +111,6 @@ def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
         logger.info("[%s] No Jira config — skipping", project.name)
         return
     logger.info("[%s] Starting Jira ingestion", project.name)
-    # Inject per-project credentials as env vars so dlt secrets picks them up
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
@@ -161,7 +160,7 @@ def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False) -> None:
 def _parse_args():
     parser = argparse.ArgumentParser(description="Feather-AI ingestion pipeline")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--project", metavar="NAME", help="Project name (matches projects/<name>.toml)")
+    group.add_argument("--project", metavar="NAME", help="Project name from secrets.toml")
     group.add_argument("--all", action="store_true", help="Run all configured projects")
     parser.add_argument(
         "--source",
