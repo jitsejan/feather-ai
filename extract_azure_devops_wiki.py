@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 from typing import Iterator
 
 import dlt
@@ -78,6 +79,83 @@ def _collect_pages(node: dict, accumulator: list[dict]) -> None:
         _collect_pages(sub, accumulator)
 
 
+def _list_attachments(
+    org_url: str,
+    project: str,
+    wiki: dict,
+    headers: dict,
+) -> list[dict]:
+    """Return a list of attachment metadata dicts from the wiki git repo."""
+    repo_id = wiki.get("repositoryId")
+    mapped_path = wiki.get("mappedPath", "/wiki").rstrip("/")
+    if not repo_id:
+        return []
+
+    attachments_path = f"{mapped_path}/.attachments"
+    url = f"{org_url}/{project}/_apis/git/repositories/{repo_id}/items"
+    try:
+        resp = requests.get(
+            url,
+            headers=headers,
+            params={
+                "api-version": "7.1",
+                "scopePath": attachments_path,
+                "recursionLevel": "full",
+                "latestProcessedChange": "false",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("value", [])
+        # Skip the folder entry itself; keep only files
+        return [
+            {
+                "repo_id": repo_id,
+                "git_path": item["path"],
+                # Normalise to just the filename relative to .attachments/
+                "name": item["path"].replace(attachments_path + "/", ""),
+                "url": item.get("url", ""),
+                "is_folder": item.get("gitObjectType", "") == "tree",
+            }
+            for item in items
+            if item.get("gitObjectType") != "tree"
+        ]
+    except requests.HTTPError as exc:
+        logger.warning("Could not list attachments for wiki %s: %s", wiki.get("name"), exc)
+        return []
+
+
+def download_ado_attachment(
+    org_url: str,
+    project: str,
+    repo_id: str,
+    git_path: str,
+    dest_path: str,
+    headers: dict,
+) -> bool:
+    """Download a single attachment from the ADO git repo to dest_path. Returns True on success."""
+    if os.path.exists(dest_path):
+        return True
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    url = f"{org_url}/{project}/_apis/git/repositories/{repo_id}/items"
+    try:
+        resp = requests.get(
+            url,
+            headers={**headers, "Accept": "application/octet-stream"},
+            params={"api-version": "7.1", "path": git_path},
+            timeout=60,
+            stream=True,
+        )
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return True
+    except Exception as exc:
+        logger.warning("Could not download attachment %s: %s", git_path, exc)
+        return False
+
+
 def _get_page_content(
     org_url: str,
     project: str,
@@ -110,8 +188,25 @@ def _get_page_content(
 
 
 # ---------------------------------------------------------------------------
-# dlt resource
+# dlt resources
 # ---------------------------------------------------------------------------
+
+def _resolve_wikis(org_url: str, project: str, wiki_name: str | None, headers: dict) -> list[dict]:
+    wikis = _list_wikis(org_url, project, headers)
+    if not wikis:
+        logger.warning("No wikis found in project '%s'", project)
+        return []
+    if wiki_name:
+        target = [w for w in wikis if w.get("name") == wiki_name]
+        if not target:
+            raise ValueError(
+                f"Wiki '{wiki_name}' not found. "
+                f"Available: {[w.get('name') for w in wikis]}"
+            )
+        return target
+    logger.info("Auto-discovered %d wiki(s): %s", len(wikis), [w.get("name") for w in wikis])
+    return wikis
+
 
 @dlt.resource(name="pages", write_disposition="replace")
 def _ado_wiki_pages(
@@ -121,24 +216,7 @@ def _ado_wiki_pages(
     pat: str,
 ) -> Iterator[dict]:
     headers = _auth_header(pat)
-
-    wikis = _list_wikis(org_url, project, headers)
-    if not wikis:
-        logger.warning("No wikis found in project '%s'", project)
-        return
-
-    if wiki_name:
-        target_wikis = [w for w in wikis if w.get("name") == wiki_name]
-        if not target_wikis:
-            raise ValueError(
-                f"Wiki '{wiki_name}' not found. "
-                f"Available: {[w.get('name') for w in wikis]}"
-            )
-    else:
-        target_wikis = wikis
-        logger.info("Auto-discovered %d wiki(s): %s", len(wikis), [w.get("name") for w in wikis])
-
-    for wiki in target_wikis:
+    for wiki in _resolve_wikis(org_url, project, wiki_name, headers):
         wiki_id = wiki["id"]
         wiki_display_name = wiki.get("name", wiki_id)
         logger.info("Processing wiki '%s' (%s)", wiki_display_name, wiki_id)
@@ -153,6 +231,7 @@ def _ado_wiki_pages(
                 "id": f"{wiki_id}:{page_path}",
                 "wiki_id": wiki_id,
                 "wiki_name": wiki_display_name,
+                "repo_id": wiki.get("repositoryId", ""),
                 "path": page_path,
                 "title": page_path.rstrip("/").split("/")[-1] or wiki_display_name,
                 "content": content,
@@ -160,6 +239,32 @@ def _ado_wiki_pages(
                 "is_parent_page": bool(stub.get("subPages")),
                 "remote_url": stub.get("remoteUrl", ""),
                 "git_item_path": stub.get("gitItemPath", ""),
+            }
+
+
+@dlt.resource(name="attachments", write_disposition="replace")
+def _ado_wiki_attachments(
+    org_url: str,
+    project: str,
+    wiki_name: str | None,
+    pat: str,
+) -> Iterator[dict]:
+    headers = _auth_header(pat)
+    for wiki in _resolve_wikis(org_url, project, wiki_name, headers):
+        wiki_display_name = wiki.get("name", wiki["id"])
+        attachments = _list_attachments(org_url, project, wiki, headers)
+        logger.info(
+            "Found %d attachment(s) in wiki '%s'", len(attachments), wiki_display_name
+        )
+        for att in attachments:
+            yield {
+                "id": f"{wiki['id']}:{att['name']}",
+                "wiki_id": wiki["id"],
+                "wiki_name": wiki_display_name,
+                "repo_id": att["repo_id"],
+                "git_path": att["git_path"],
+                "name": att["name"],
+                "download_url": att["url"],
             }
 
 
@@ -189,6 +294,7 @@ def azure_devops_wiki_source(
     org_url = org_url.rstrip("/")
 
     yield _ado_wiki_pages(org_url, project, wiki_name, pat)
+    yield _ado_wiki_attachments(org_url, project, wiki_name, pat)
 
 
 def ado_wiki_source():

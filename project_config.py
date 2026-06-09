@@ -33,11 +33,12 @@ DEFAULT_EXPAND = "body.storage,space,metadata.labels,ancestors,version"
 @dataclass
 class ProjectConfig:
     name: str
-    base_url: str
-    username: str
-    password: str
-    confluence_space_key: str
-    jira_board_id: int
+    # Atlassian (Confluence + Jira) — optional when using ADO-only projects
+    base_url: str | None = field(default=None)
+    username: str | None = field(default=None)
+    password: str | None = field(default=None)
+    confluence_space_key: str | None = field(default=None)
+    jira_board_id: int | None = field(default=None)
     confluence_expand: str = field(default=DEFAULT_EXPAND)
     # Azure DevOps wiki — all optional; set to enable ADO ingestion
     ado_org_url: str | None = field(default=None)
@@ -71,13 +72,14 @@ def load_project(name: str) -> ProjectConfig:
             f"No configuration found for project '{name}'. "
             f"Add a [projects.{name}] section to your .dlt/secrets.toml."
         )
+    jira_board_id = secrets.get("jira_board_id")
     return ProjectConfig(
         name=name,
-        base_url=secrets["base_url"],
-        username=secrets["username"],
-        password=secrets["password"],
-        confluence_space_key=secrets["confluence_space_key"],
-        jira_board_id=int(secrets["jira_board_id"]),
+        base_url=secrets.get("base_url"),
+        username=secrets.get("username"),
+        password=secrets.get("password"),
+        confluence_space_key=secrets.get("confluence_space_key"),
+        jira_board_id=int(jira_board_id) if jira_board_id is not None else None,
         confluence_expand=secrets.get("confluence_expand", DEFAULT_EXPAND),
         ado_org_url=secrets.get("ado_org_url"),
         ado_project=secrets.get("ado_project"),

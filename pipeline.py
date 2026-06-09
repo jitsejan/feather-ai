@@ -73,6 +73,9 @@ def _confluence_processed(project: ProjectConfig):
 
 
 def run_confluence(project: ProjectConfig, drop_existing: bool = False) -> None:
+    if not project.base_url or not project.confluence_space_key:
+        logger.info("[%s] No Confluence config — skipping", project.name)
+        return
     logger.info("[%s] Starting Confluence ingestion", project.name)
     # Inject per-project credentials as env vars so dlt secrets picks them up
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
@@ -104,6 +107,9 @@ def _jira_processed(project: ProjectConfig):
 
 
 def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
+    if not project.base_url or not project.jira_board_id:
+        logger.info("[%s] No Jira config — skipping", project.name)
+        return
     logger.info("[%s] Starting Jira ingestion", project.name)
     # Inject per-project credentials as env vars so dlt secrets picks them up
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
