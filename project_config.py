@@ -14,6 +14,12 @@ secrets.toml structure:
     jira_board_id        = 42
     # optional — defaults shown below:
     # confluence_expand = "body.storage,space,metadata.labels,ancestors,version"
+
+    # Azure DevOps wiki (optional — omit if not used)
+    # ado_org_url   = "https://dev.azure.com/your-org"
+    # ado_project   = "your-project"
+    # ado_wiki_name = "your-wiki"   # leave out to ingest all wikis
+    # ado_pat       = "YOUR_PERSONAL_ACCESS_TOKEN"
 """
 from __future__ import annotations
 
@@ -33,6 +39,16 @@ class ProjectConfig:
     confluence_space_key: str
     jira_board_id: int
     confluence_expand: str = field(default=DEFAULT_EXPAND)
+    # Azure DevOps wiki — all optional; set to enable ADO ingestion
+    ado_org_url: str | None = field(default=None)
+    ado_project: str | None = field(default=None)
+    ado_wiki_name: str | None = field(default=None)
+    ado_pat: str | None = field(default=None)
+
+    @property
+    def has_ado(self) -> bool:
+        """True when the minimum ADO config (org_url, project, pat) is present."""
+        return bool(self.ado_org_url and self.ado_project and self.ado_pat)
 
     @property
     def confluence_dataset(self) -> str:
@@ -41,6 +57,10 @@ class ProjectConfig:
     @property
     def jira_dataset(self) -> str:
         return f"{self.name}_jira"
+
+    @property
+    def ado_dataset(self) -> str:
+        return f"{self.name}_ado_wiki"
 
 
 def load_project(name: str) -> ProjectConfig:
@@ -59,6 +79,10 @@ def load_project(name: str) -> ProjectConfig:
         confluence_space_key=secrets["confluence_space_key"],
         jira_board_id=int(secrets["jira_board_id"]),
         confluence_expand=secrets.get("confluence_expand", DEFAULT_EXPAND),
+        ado_org_url=secrets.get("ado_org_url"),
+        ado_project=secrets.get("ado_project"),
+        ado_wiki_name=secrets.get("ado_wiki_name"),
+        ado_pat=secrets.get("ado_pat"),
     )
 
 
