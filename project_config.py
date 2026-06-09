@@ -6,20 +6,29 @@ the gitignored secrets.toml under [projects.<name>]. Nothing
 project-specific is committed to the repo.
 
 secrets.toml structure:
-    [projects.mycompany]
-    base_url  = "https://mycompany.atlassian.net"
-    username  = "me@mycompany.com"
-    password  = "ATLASSIAN_API_TOKEN"
+
+    [projects.myproject]
+    # Atlassian (optional — omit if not using Confluence/Jira)
+    base_url             = "https://myorg.atlassian.net"
+    username             = "me@example.com"
+    password             = "ATLASSIAN_API_TOKEN"
     confluence_space_key = "ENG"
     jira_board_id        = 42
-    # optional — defaults shown below:
-    # confluence_expand = "body.storage,space,metadata.labels,ancestors,version"
+    # confluence_expand  = "body.storage,space,metadata.labels,ancestors,version"
 
-    # Azure DevOps wiki (optional — omit if not used)
+    # Azure DevOps wiki (optional — omit if not using ADO)
     # ado_org_url   = "https://dev.azure.com/your-org"
     # ado_project   = "your-project"
     # ado_wiki_name = "your-wiki"   # leave out to ingest all wikis
-    # ado_pat       = "YOUR_PERSONAL_ACCESS_TOKEN"
+    # ado_pat       = "YOUR_PERSONAL_ACCESS_TOKEN"  # Wiki (Read) scope
+
+    # Obsidian export (optional)
+    # obsidian_vault_path = "folder/inside/vault"
+    # obsidian_label      = "Display Name"   # shown in weekly note
+
+    [obsidian]
+    vault   = "/path/to/your/ObsidianVault"
+    my_name = "Your Name"
 """
 from __future__ import annotations
 
@@ -33,18 +42,21 @@ DEFAULT_EXPAND = "body.storage,space,metadata.labels,ancestors,version"
 @dataclass
 class ProjectConfig:
     name: str
-    # Atlassian (Confluence + Jira) — optional when using ADO-only projects
+    # Atlassian (Confluence + Jira) — optional for ADO-only projects
     base_url: str | None = field(default=None)
     username: str | None = field(default=None)
     password: str | None = field(default=None)
     confluence_space_key: str | None = field(default=None)
     jira_board_id: int | None = field(default=None)
     confluence_expand: str = field(default=DEFAULT_EXPAND)
-    # Azure DevOps wiki — all optional; set to enable ADO ingestion
+    # Azure DevOps wiki — all optional
     ado_org_url: str | None = field(default=None)
     ado_project: str | None = field(default=None)
     ado_wiki_name: str | None = field(default=None)
     ado_pat: str | None = field(default=None)
+    # Obsidian export — optional
+    obsidian_vault_path: str | None = field(default=None)
+    obsidian_label: str | None = field(default=None)
 
     @property
     def has_ado(self) -> bool:
@@ -85,15 +97,25 @@ def load_project(name: str) -> ProjectConfig:
         ado_project=secrets.get("ado_project"),
         ado_wiki_name=secrets.get("ado_wiki_name"),
         ado_pat=secrets.get("ado_pat"),
+        obsidian_vault_path=secrets.get("obsidian_vault_path"),
+        obsidian_label=secrets.get("obsidian_label"),
     )
 
 
 def list_projects() -> list[str]:
     """Return names of all projects defined in secrets.toml."""
     all_projects = dlt.secrets.get("projects") or {}
-    # Filter out any non-dict entries (e.g. if someone puts a scalar under [projects])
     return sorted(k for k, v in all_projects.items() if isinstance(v, dict))
 
 
 def load_all_projects() -> list[ProjectConfig]:
     return [load_project(name) for name in list_projects()]
+
+
+def load_obsidian_config() -> dict:
+    """Return global Obsidian settings from secrets.toml [obsidian]."""
+    cfg = dlt.secrets.get("obsidian") or {}
+    return {
+        "vault": cfg.get("vault", ""),
+        "my_name": cfg.get("my_name", ""),
+    }
