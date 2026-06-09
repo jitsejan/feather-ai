@@ -25,6 +25,7 @@ from markdownify import markdownify
 from requests.auth import HTTPBasicAuth
 
 from project_config import load_all_projects, ProjectConfig
+from extract_azure_devops_wiki import download_ado_attachment, _auth_header
 
 MOTHERDUCK_DB = "feather_ai"
 OBSIDIAN_VAULT = "/Users/jitsejan/Documents/VAULT"
@@ -32,6 +33,7 @@ MY_NAME = "REDACTED"
 
 VAULT_PATHS = {
     "nged": "current-work/REDACTED/REDACTED",
+    REDACTED,
     REDACTED,
 }
 
@@ -143,12 +145,114 @@ def confluence_html_to_markdown(
     return md.strip()
 
 
+def ado_wiki_md_to_obsidian(content: str, attachments_dir: str) -> str:
+    """Rewrite ADO wiki markdown to Obsidian syntax:
+    - Image attachments  → ![[attachments/filename]]
+    - Internal page links → [[Page Title|label]]
+    - External links are left untouched.
+    """
+    if not content:
+        return ""
+
+    # --- Images (must run before link rewrite to avoid double-processing) ---
+    def replace_image(m):
+        alt = m.group(1)
+        src = m.group(2)
+        att_match = re.search(r'\.attachments/(.+)', src)
+        if not att_match:
+            return m.group(0)  # external image — leave as-is
+        filename = att_match.group(1)
+        embed = f"![[attachments/{filename}]]"
+        if alt:
+            embed += f"\n*{alt}*"
+        return embed
+
+    content = re.sub(r'!\[([^\]]*)\]\(([^\)]+)\)', replace_image, content)
+
+    # --- Internal page links → Obsidian wikilinks ---
+    def replace_page_link(m):
+        label = m.group(1)
+        target = m.group(2)
+        # Skip external URLs and attachments (already handled above)
+        if target.startswith("http") or ".attachments" in target:
+            return m.group(0)
+        # Derive page title from the last path segment, replacing hyphens with spaces
+        page_title = target.rstrip("/").split("/")[-1].replace("-", " ")
+        if label == page_title:
+            return f"[[{page_title}]]"
+        return f"[[{page_title}|{label}]]"
+
+    content = re.sub(r'\[([^\]]+)\]\((/[^\)]+)\)', replace_page_link, content)
+    return content
+
+
+def export_ado_wiki(con, project: ProjectConfig, vault_path: str) -> None:
+    if not project.has_ado:
+        return
+
+    dataset = project.ado_dataset
+    try:
+        rows = con.execute(f"SELECT id, wiki_name, path, title, content FROM {dataset}.pages").fetchall()
+    except Exception as e:
+        print(f"  ado_wiki: could not read pages — {e}")
+        return
+
+    headers = _auth_header(project.ado_pat)
+    org_url = project.ado_org_url.rstrip("/")
+    ado_project = project.ado_project
+
+    # Load attachment metadata for download
+    try:
+        att_rows = con.execute(
+            f"SELECT repo_id, git_path, name FROM {dataset}.attachments"
+        ).fetchall()
+    except Exception:
+        att_rows = []
+
+    for wiki_id_path, wiki_name, page_path, title, content in rows:
+        # Place pages under ado/<wiki_name>/<page_path structure>
+        page_parts = [p for p in page_path.strip("/").split("/") if p]
+        if not page_parts:
+            page_parts = [safe_filename(wiki_name)]
+
+        folder = os.path.join(OBSIDIAN_VAULT, vault_path, "ado", safe_filename(wiki_name), *[safe_filename(p) for p in page_parts[:-1]])
+        attachments_dir = os.path.join(OBSIDIAN_VAULT, vault_path, "ado", safe_filename(wiki_name), "attachments")
+        os.makedirs(folder, exist_ok=True)
+
+        # Download attachments referenced on this page
+        for repo_id, git_path, att_name in att_rows:
+            dest = os.path.join(attachments_dir, att_name)
+            if not os.path.exists(dest):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                download_ado_attachment(org_url, ado_project, repo_id, git_path, dest, headers)
+
+        filename = safe_filename(page_parts[-1]) + ".md"
+        filepath = os.path.join(folder, filename)
+        with open(filepath, "w") as f:
+            f.write("---\n")
+            f.write(f"title: \"{title}\"\n")
+            f.write(f"source: ado_wiki\n")
+            f.write(f"project: {project.name}\n")
+            f.write(f"wiki: {wiki_name}\n")
+            f.write(f"path: {page_path}\n")
+            f.write("---\n\n")
+            f.write(ado_wiki_md_to_obsidian(content or "", attachments_dir))
+
+    print(f"  ado_wiki: {len(rows)} pages written")
+
+
 def export_confluence(con, project: ProjectConfig, vault_path: str):
+    if not project.base_url or not project.confluence_space_key:
+        return
     auth = HTTPBasicAuth(project.username, project.password)
-    rows = con.execute(f"""
-        SELECT id, title, content_html, space_key, updated
-        FROM {project.confluence_dataset}.process_pages
-    """).fetchall()
+    try:
+        rows = con.execute(f"""
+            SELECT id, title, content_html, space_key, updated
+            FROM {project.confluence_dataset}.process_pages
+        """).fetchall()
+    except Exception as e:
+        print(f"  confluence: could not read pages — {e}")
+        return
 
     for page_id, title, content_html, space_key, updated in rows:
         folder = os.path.join(OBSIDIAN_VAULT, vault_path, "confluence", space_key)
@@ -242,6 +346,8 @@ def clean_jira_body(text: str, confluence_page_map: dict, jira_base_url: str, co
 
 
 def export_jira(con, project: ProjectConfig, vault_path: str):
+    if not project.base_url or not project.jira_board_id:
+        return
     dataset = project.jira_dataset
     folder = os.path.join(OBSIDIAN_VAULT, vault_path, "jira")
     os.makedirs(folder, exist_ok=True)
@@ -473,6 +579,7 @@ def main():
         print(f"Exporting {project.name}...")
         export_confluence(con, project, vault_path)
         export_jira(con, project, vault_path)
+        export_ado_wiki(con, project, vault_path)
 
     print("Generating weekly note...")
     generate_weekly_note(con, projects)
