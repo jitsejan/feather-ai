@@ -1,19 +1,20 @@
 """
-Export Confluence and Jira data from MotherDuck to Obsidian vault.
+Export Confluence, Jira and ADO wiki data from MotherDuck to an Obsidian vault.
 
 Usage:
     uv run export_to_obsidian.py
 
-Confluence pages are written to:
-    <OBSIDIAN_VAULT>/current-work/<project_path>/confluence/<space_key>/<title>.md
+Per-project vault paths and labels are configured in .dlt/secrets.toml:
 
-Jira issues are written to:
-    <OBSIDIAN_VAULT>/current-work/<project_path>/jira/<issue_key>.md
+    [projects.myproject]
+    obsidian_vault_path = "folder/inside/vault"
+    obsidian_label      = "Display Name"   # used in weekly note
 
-Weekly dashboard note is written to:
-    <OBSIDIAN_VAULT>/current-work/weekly/YYYY-Www.md
+    [obsidian]
+    vault   = "/path/to/ObsidianVault"
+    my_name = "Your Name"
 
-Project-to-vault-path mapping is defined in VAULT_PATHS below.
+Projects without obsidian_vault_path are skipped.
 """
 import os
 import re
@@ -24,23 +25,10 @@ from datetime import date
 from markdownify import markdownify
 from requests.auth import HTTPBasicAuth
 
-from project_config import load_all_projects, ProjectConfig
+from project_config import load_all_projects, load_obsidian_config, ProjectConfig
 from extract_azure_devops_wiki import download_ado_attachment, _auth_header
 
 MOTHERDUCK_DB = "feather_ai"
-OBSIDIAN_VAULT = "/Users/jitsejan/Documents/VAULT"
-MY_NAME = "REDACTED"
-
-VAULT_PATHS = {
-    "nged": "current-work/REDACTED/REDACTED",
-    REDACTED,
-    REDACTED,
-}
-
-PROJECT_LABELS = {
-    "nged": "REDACTED",
-    REDACTED,
-}
 
 
 def safe_filename(title: str) -> str:
@@ -145,7 +133,7 @@ def confluence_html_to_markdown(
     return md.strip()
 
 
-def ado_wiki_md_to_obsidian(content: str, attachments_dir: str) -> str:
+def ado_wiki_md_to_obsidian(content: str) -> str:
     """Rewrite ADO wiki markdown to Obsidian syntax:
     - Image attachments  → ![[attachments/filename]]
     - Internal page links → [[Page Title|label]]
@@ -154,13 +142,12 @@ def ado_wiki_md_to_obsidian(content: str, attachments_dir: str) -> str:
     if not content:
         return ""
 
-    # --- Images (must run before link rewrite to avoid double-processing) ---
     def replace_image(m):
         alt = m.group(1)
         src = m.group(2)
         att_match = re.search(r'\.attachments/(.+)', src)
         if not att_match:
-            return m.group(0)  # external image — leave as-is
+            return m.group(0)
         filename = att_match.group(1)
         embed = f"![[attachments/{filename}]]"
         if alt:
@@ -169,14 +156,11 @@ def ado_wiki_md_to_obsidian(content: str, attachments_dir: str) -> str:
 
     content = re.sub(r'!\[([^\]]*)\]\(([^\)]+)\)', replace_image, content)
 
-    # --- Internal page links → Obsidian wikilinks ---
     def replace_page_link(m):
         label = m.group(1)
         target = m.group(2)
-        # Skip external URLs and attachments (already handled above)
         if target.startswith("http") or ".attachments" in target:
             return m.group(0)
-        # Derive page title from the last path segment, replacing hyphens with spaces
         page_title = target.rstrip("/").split("/")[-1].replace("-", " ")
         if label == page_title:
             return f"[[{page_title}]]"
@@ -186,13 +170,15 @@ def ado_wiki_md_to_obsidian(content: str, attachments_dir: str) -> str:
     return content
 
 
-def export_ado_wiki(con, project: ProjectConfig, vault_path: str) -> None:
+def export_ado_wiki(con, project: ProjectConfig, vault_path: str, obsidian_vault: str) -> None:
     if not project.has_ado:
         return
 
     dataset = project.ado_dataset
     try:
-        rows = con.execute(f"SELECT id, wiki_name, path, title, content FROM {dataset}.pages").fetchall()
+        rows = con.execute(
+            f"SELECT id, wiki_name, path, title, content FROM {dataset}.pages"
+        ).fetchall()
     except Exception as e:
         print(f"  ado_wiki: could not read pages — {e}")
         return
@@ -201,7 +187,6 @@ def export_ado_wiki(con, project: ProjectConfig, vault_path: str) -> None:
     org_url = project.ado_org_url.rstrip("/")
     ado_project = project.ado_project
 
-    # Load attachment metadata for download
     try:
         att_rows = con.execute(
             f"SELECT repo_id, git_path, name FROM {dataset}.attachments"
@@ -209,25 +194,27 @@ def export_ado_wiki(con, project: ProjectConfig, vault_path: str) -> None:
     except Exception:
         att_rows = []
 
-    for wiki_id_path, wiki_name, page_path, title, content in rows:
-        # Place pages under ado/<wiki_name>/<page_path structure>
+    for _id, wiki_name, page_path, title, content in rows:
         page_parts = [p for p in page_path.strip("/").split("/") if p]
         if not page_parts:
             page_parts = [safe_filename(wiki_name)]
 
-        folder = os.path.join(OBSIDIAN_VAULT, vault_path, "ado", safe_filename(wiki_name), *[safe_filename(p) for p in page_parts[:-1]])
-        attachments_dir = os.path.join(OBSIDIAN_VAULT, vault_path, "ado", safe_filename(wiki_name), "attachments")
+        folder = os.path.join(
+            obsidian_vault, vault_path, "ado", safe_filename(wiki_name),
+            *[safe_filename(p) for p in page_parts[:-1]]
+        )
+        attachments_dir = os.path.join(
+            obsidian_vault, vault_path, "ado", safe_filename(wiki_name), "attachments"
+        )
         os.makedirs(folder, exist_ok=True)
 
-        # Download attachments referenced on this page
         for repo_id, git_path, att_name in att_rows:
             dest = os.path.join(attachments_dir, att_name)
             if not os.path.exists(dest):
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 download_ado_attachment(org_url, ado_project, repo_id, git_path, dest, headers)
 
-        filename = safe_filename(page_parts[-1]) + ".md"
-        filepath = os.path.join(folder, filename)
+        filepath = os.path.join(folder, safe_filename(page_parts[-1]) + ".md")
         with open(filepath, "w") as f:
             f.write("---\n")
             f.write(f"title: \"{title}\"\n")
@@ -236,12 +223,12 @@ def export_ado_wiki(con, project: ProjectConfig, vault_path: str) -> None:
             f.write(f"wiki: {wiki_name}\n")
             f.write(f"path: {page_path}\n")
             f.write("---\n\n")
-            f.write(ado_wiki_md_to_obsidian(content or "", attachments_dir))
+            f.write(ado_wiki_md_to_obsidian(content or ""))
 
     print(f"  ado_wiki: {len(rows)} pages written")
 
 
-def export_confluence(con, project: ProjectConfig, vault_path: str):
+def export_confluence(con, project: ProjectConfig, vault_path: str, obsidian_vault: str):
     if not project.base_url or not project.confluence_space_key:
         return
     auth = HTTPBasicAuth(project.username, project.password)
@@ -255,7 +242,7 @@ def export_confluence(con, project: ProjectConfig, vault_path: str):
         return
 
     for page_id, title, content_html, space_key, updated in rows:
-        folder = os.path.join(OBSIDIAN_VAULT, vault_path, "confluence", space_key)
+        folder = os.path.join(obsidian_vault, vault_path, "confluence", space_key)
         attachments_dir = os.path.join(folder, "attachments")
         os.makedirs(folder, exist_ok=True)
 
@@ -345,11 +332,11 @@ def clean_jira_body(text: str, confluence_page_map: dict, jira_base_url: str, co
     return text.strip()
 
 
-def export_jira(con, project: ProjectConfig, vault_path: str):
+def export_jira(con, project: ProjectConfig, vault_path: str, obsidian_vault: str, my_name: str):
     if not project.base_url or not project.jira_board_id:
         return
     dataset = project.jira_dataset
-    folder = os.path.join(OBSIDIAN_VAULT, vault_path, "jira")
+    folder = os.path.join(obsidian_vault, vault_path, "jira")
     os.makedirs(folder, exist_ok=True)
 
     # Build Confluence page ID → title map for wikilink resolution
@@ -454,10 +441,10 @@ def export_jira(con, project: ProjectConfig, vault_path: str):
     print(f"  jira: {len(issues)} issues written")
 
 
-def generate_weekly_note(con, projects: list):
+def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str):
     today = date.today()
     week_str = today.strftime("%Y-W%V")  # e.g. 2026-W24
-    folder = os.path.join(OBSIDIAN_VAULT, "current-work", "weekly")
+    folder = os.path.join(obsidian_vault, "current-work", "weekly")
     os.makedirs(folder, exist_ok=True)
     filepath = os.path.join(folder, f"{week_str}.md")
 
@@ -465,7 +452,7 @@ def generate_weekly_note(con, projects: list):
     project_data = []
     for project in projects:
         dataset = project.jira_dataset
-        label = PROJECT_LABELS.get(project.name, project.name)
+        label = project.obsidian_label or project.name
 
         try:
             # Active sprint issues (scrum) or active status (kanban)
@@ -487,7 +474,7 @@ def generate_weekly_note(con, projects: list):
             my_all_issues = con.execute(f"""
                 SELECT key, summary, status, assignee, priority, parent_key, sprint_name
                 FROM {dataset}.process_issues
-                WHERE assignee = '{MY_NAME}'
+                WHERE assignee = '{my_name}'
                   AND status_category != 'Done'
                 ORDER BY status_category, status
             """).fetchall()
@@ -522,7 +509,7 @@ def generate_weekly_note(con, projects: list):
         f.write(f"## 🔴 My tickets\n\n")
         has_my_tickets = False
         for pd in project_data:
-            my_active = [r for r in pd["issues"] if r[3] == MY_NAME]
+            my_active = [r for r in pd["issues"] if r[3] == my_name]
             my_extra = pd.get("my_extra_issues", [])
             if not my_active and not my_extra:
                 continue
@@ -540,7 +527,7 @@ def generate_weekly_note(con, projects: list):
                     f.write(f"| [[{key}]] | {summary}{parent} | {status} _(backlog)_ | {priority} |\n")
             f.write("\n")
         if not has_my_tickets:
-            f.write(f"_No tickets assigned to {MY_NAME}._\n\n")
+            f.write(f"_No tickets assigned to {my_name}._\n\n")
 
         # Section 2: Full active sprint per project
         f.write(f"## 📋 Active sprints\n\n")
@@ -557,8 +544,8 @@ def generate_weekly_note(con, projects: list):
             f.write("|-----|---------|----------|--------|\n")
             for key, summary, status, assignee, priority, parent_key, sprint_name in pd["issues"]:
                 assignee_short = assignee.split()[0] if assignee else "—"
-                bold_open = "**" if assignee == MY_NAME else ""
-                bold_close = "**" if assignee == MY_NAME else ""
+                bold_open = "**" if assignee == my_name else ""
+                bold_close = "**" if assignee == my_name else ""
                 f.write(f"| {bold_open}[[{key}]]{bold_close} | {bold_open}{summary}{bold_close} | {assignee_short} | {status} |\n")
             f.write("\n")
 
@@ -566,23 +553,33 @@ def generate_weekly_note(con, projects: list):
 
 
 def main():
+    obs = load_obsidian_config()
+    obsidian_vault = obs["vault"]
+    my_name = obs["my_name"]
+
+    if not obsidian_vault:
+        raise RuntimeError(
+            "No Obsidian vault configured. "
+            "Add [obsidian] vault = '...' to .dlt/secrets.toml."
+        )
+
     credentials = dlt.secrets["destination.motherduck.credentials"]
     con = duckdb.connect(credentials)
     projects = load_all_projects()
 
     for project in projects:
-        vault_path = VAULT_PATHS.get(project.name)
+        vault_path = project.obsidian_vault_path
         if not vault_path:
-            print(f"Skipping '{project.name}' — no vault path configured in VAULT_PATHS")
+            print(f"Skipping '{project.name}' — no obsidian_vault_path configured")
             continue
 
         print(f"Exporting {project.name}...")
-        export_confluence(con, project, vault_path)
-        export_jira(con, project, vault_path)
-        export_ado_wiki(con, project, vault_path)
+        export_confluence(con, project, vault_path, obsidian_vault)
+        export_jira(con, project, vault_path, obsidian_vault, my_name)
+        export_ado_wiki(con, project, vault_path, obsidian_vault)
 
     print("Generating weekly note...")
-    generate_weekly_note(con, projects)
+    generate_weekly_note(con, projects, obsidian_vault, my_name)
 
     print("Done.")
 
