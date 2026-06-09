@@ -22,6 +22,7 @@ from dlt.destinations import duckdb
 
 from extract_confluence import atlassian_confluence_source, process_pages, process_hierarchy
 from extract_jira import jira_source, process_issues
+from extract_azure_devops_wiki import azure_devops_wiki_source
 from project_config import ProjectConfig, load_project, load_all_projects
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,33 @@ def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Azure DevOps Wiki
+# ---------------------------------------------------------------------------
+
+def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False) -> None:
+    if not project.has_ado:
+        logger.info("[%s] No ADO config — skipping Azure DevOps wiki ingestion", project.name)
+        return
+    logger.info("[%s] Starting Azure DevOps wiki ingestion", project.name)
+    refresh = "drop_resources" if drop_existing else None
+    source = azure_devops_wiki_source(
+        org_url=project.ado_org_url,
+        project=project.ado_project,
+        wiki_name=project.ado_wiki_name,
+        pat=project.ado_pat,
+    )
+    pipeline = dlt.pipeline(
+        pipeline_name=f"{project.name}_ado_wiki",
+        destination=_destination(),
+        dataset_name=project.ado_dataset,
+        refresh=refresh,
+    )
+    with contextlib.redirect_stdout(StringIO()), contextlib.redirect_stderr(StringIO()):
+        load_info = pipeline.run(source, refresh=refresh)
+    logger.info("[%s] ADO wiki done: %s", project.name, load_info)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -131,9 +159,9 @@ def _parse_args():
     group.add_argument("--all", action="store_true", help="Run all configured projects")
     parser.add_argument(
         "--source",
-        choices=["confluence", "jira"],
+        choices=["confluence", "jira", "ado_wiki"],
         default=None,
-        help="Which source to ingest (default: both)",
+        help="Which source to ingest (default: all)",
     )
     parser.add_argument("--drop-existing", action="store_true")
     parser.add_argument("--log-level", default="INFO",
@@ -148,6 +176,8 @@ def run_project(project: ProjectConfig, source: str | None, drop_existing: bool)
         run_confluence(project, drop_existing=drop_existing)
     if source in (None, "jira"):
         run_jira(project, drop_existing=drop_existing)
+    if source in (None, "ado_wiki"):
+        run_ado_wiki(project, drop_existing=drop_existing)
 
 
 if __name__ == "__main__":
