@@ -441,26 +441,49 @@ def export_jira(con, project: ProjectConfig, vault_path: str, obsidian_vault: st
     print(f"  jira: {len(issues)} issues written")
 
 
-def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str):
+def _parse_checked_tickets(filepath: str) -> set:
+    """Read an existing weekly note and return the set of ticket IDs that are checked off.
+
+    Handles both formats:
+      - [x] [HMP-187 — …](url)          ← link-style
+      - [x] 25116 — …                   ← plain text
+    """
+    checked = set()
+    if not os.path.exists(filepath):
+        return checked
+    # Match:  - [x] followed by optional [  then the ticket id
+    pattern = re.compile(r'- \[x\].*?[\[\s](\w+-\d+|\d{4,})\b', re.IGNORECASE)
+    with open(filepath) as fh:
+        for line in fh:
+            m = pattern.search(line)
+            if m:
+                checked.add(m.group(1))
+    return checked
+
+
+def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str, my_name_ado: str):
     today = date.today()
     week_str = today.strftime("%Y-W%V")  # e.g. 2026-W24
     folder = os.path.join(obsidian_vault, "current-work", "weekly")
     os.makedirs(folder, exist_ok=True)
     filepath = os.path.join(folder, f"{week_str}.md")
 
-    # Collect data per project
+    # Read previously ticked checkboxes so we don't lose manual state
+    checked_tickets = _parse_checked_tickets(filepath)
+
+    # Collect data per project — Jira
     project_data = []
     for project in projects:
         dataset = project.jira_dataset
         label = project.obsidian_label or project.name
 
         try:
-            # Active sprint issues (scrum) or active status (kanban)
             active_issues = con.execute(f"""
                 SELECT key, summary, status, assignee, priority, parent_key, sprint_name
                 FROM {dataset}.process_issues
-                WHERE sprint_state = 'active'
-                   OR (sprint_name IS NULL AND status_category = 'In Progress')
+                WHERE (sprint_state = 'active'
+                   OR (sprint_name IS NULL AND status_category = 'In Progress'))
+                  AND status_category != 'Done'
                 ORDER BY assignee, status
             """).fetchall()
 
@@ -469,7 +492,6 @@ def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str)
                 "Kanban"
             )
 
-            # All tickets assigned to me (including backlog/to-do not in active sprint)
             active_keys = {r[0] for r in active_issues}
             my_all_issues = con.execute(f"""
                 SELECT key, summary, status, assignee, priority, parent_key, sprint_name
@@ -478,7 +500,6 @@ def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str)
                   AND status_category != 'Done'
                 ORDER BY status_category, status
             """).fetchall()
-            # Split: in active sprint (already covered) vs backlog/other
             my_extra_issues = [r for r in my_all_issues if r[0] not in active_keys]
 
             project_data.append({
@@ -498,6 +519,51 @@ def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str)
                 "error": str(e),
             })
 
+    # Collect ADO boards data per project
+    ado_board_data = []
+    for project in projects:
+        if not project.has_ado_boards:
+            continue
+        dataset = project.ado_boards_dataset
+        label = project.obsidian_label or project.name
+        org_url = (project.ado_org_url or "").rstrip("/")
+        ado_project = project.ado_boards_project or ""
+        try:
+            sprint_row = con.execute(f"""
+                SELECT name FROM {dataset}.iterations WHERE time_frame = 'current' LIMIT 1
+            """).fetchone()
+            current_sprint = sprint_row[0] if sprint_row else None
+
+            all_items = con.execute(f"""
+                SELECT id, title, work_item_type, state, assigned_to, parent_id, sprint_name
+                FROM {dataset}.work_items
+                WHERE state != 'Closed'
+                ORDER BY assigned_to, state
+            """).fetchall()
+
+            my_items = [r for r in all_items if r[4] == my_name_ado]
+
+            ado_board_data.append({
+                "label": label,
+                "name": project.name,
+                "sprint": current_sprint,
+                "issues": all_items,
+                "my_issues": my_items,
+                "org_url": org_url,
+                "ado_project": ado_project,
+            })
+        except Exception as e:
+            ado_board_data.append({
+                "label": label,
+                "name": project.name,
+                "sprint": None,
+                "issues": [],
+                "my_issues": [],
+                "org_url": org_url,
+                "ado_project": ado_project,
+                "error": str(e),
+            })
+
     with open(filepath, "w") as f:
         f.write(f"---\n")
         f.write(f"date: {today.isoformat()}\n")
@@ -505,29 +571,49 @@ def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str)
         f.write(f"---\n\n")
         f.write(f"# Week {week_str}\n\n")
 
-        # Section 1: My tickets across all projects
+        # Section 1: My active tickets — checkbox list, state preserved across re-exports
         f.write(f"## 🔴 My tickets\n\n")
         has_my_tickets = False
+
+        # Jira — active sprint tickets assigned to me (exclude Done)
         for pd in project_data:
-            my_active = [r for r in pd["issues"] if r[3] == my_name]
-            my_extra = pd.get("my_extra_issues", [])
-            if not my_active and not my_extra:
+            base_url = next((p.base_url for p in projects if p.name == pd["name"]), "") or ""
+            my_active = [
+                r for r in pd["issues"]
+                if r[3] == my_name and r[2] not in ("Done", "Closed", "Resolved")
+            ]
+            if not my_active:
                 continue
-            has_my_tickets = True
-            sprint_label = pd["sprint"] or "Kanban"
-            f.write(f"### {pd['label']} — {sprint_label}\n\n")
-            f.write("| Key | Summary | Status | Priority |\n")
-            f.write("|-----|---------|--------|----------|\n")
+            f.write(f"### {pd['label']}\n\n")
             for key, summary, status, assignee, priority, parent_key, sprint_name in my_active:
-                parent = f" _(↑ [[{parent_key}]])_" if parent_key else ""
-                f.write(f"| [[{key}]] | {summary}{parent} | {status} | {priority} |\n")
-            if my_extra:
-                for key, summary, status, assignee, priority, parent_key, sprint_name in my_extra:
-                    parent = f" _(↑ [[{parent_key}]])_" if parent_key else ""
-                    f.write(f"| [[{key}]] | {summary}{parent} | {status} _(backlog)_ | {priority} |\n")
+                tick = "x" if key in checked_tickets else " "
+                label_text = f"{key} — {summary}"
+                link = f"[{label_text}]({base_url}/browse/{key})" if base_url else label_text
+                f.write(f"- [{tick}] {link} `{status}`\n")
+                has_my_tickets = True
             f.write("\n")
+
+        # ADO boards — active items assigned to me (exclude Closed/Resolved)
+        for pd in ado_board_data:
+            org_url = pd.get("org_url", "")
+            ado_project = pd.get("ado_project", "")
+            my_active_ado = [
+                r for r in pd["my_issues"]
+                if r[3] not in ("Closed", "Resolved", "Done")
+            ]
+            if not my_active_ado:
+                continue
+            f.write(f"### {pd['label']}\n\n")
+            for item_id, title, wtype, state, assignee, parent_id, sprint in my_active_ado:
+                tick = "x" if str(item_id) in checked_tickets else " "
+                label_text = f"{item_id} — {title}"
+                link = f"[{label_text}]({org_url}/{ado_project}/_workitems/edit/{item_id})" if org_url else label_text
+                f.write(f"- [{tick}] {link} `{state}`\n")
+                has_my_tickets = True
+            f.write("\n")
+
         if not has_my_tickets:
-            f.write(f"_No tickets assigned to {my_name}._\n\n")
+            f.write("_No active tickets assigned to you this week._\n\n")
 
         # Section 2: Full active sprint per project
         f.write(f"## 📋 Active sprints\n\n")
@@ -547,6 +633,23 @@ def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str)
                 bold_open = "**" if assignee == my_name else ""
                 bold_close = "**" if assignee == my_name else ""
                 f.write(f"| {bold_open}[[{key}]]{bold_close} | {bold_open}{summary}{bold_close} | {assignee_short} | {status} |\n")
+            f.write("\n")
+
+        # ADO boards — full sprint
+        for pd in ado_board_data:
+            sprint_label = pd["sprint"] or "Current Sprint"
+            total = len(pd["issues"])
+            f.write(f"### {pd['label']} — {sprint_label} ({total} items, ADO)\n\n")
+            if not pd["issues"]:
+                f.write("_No active items._\n\n")
+                continue
+            f.write("| ID | Summary | Assignee | Type | Status |\n")
+            f.write("|----|---------|----------|------|--------|\n")
+            for item_id, title, wtype, state, assignee, parent_id, sprint in pd["issues"]:
+                assignee_short = assignee.split()[0] if assignee else "—"
+                bold_open = "**" if assignee == my_name_ado else ""
+                bold_close = "**" if assignee == my_name_ado else ""
+                f.write(f"| {bold_open}{item_id}{bold_close} | {bold_open}{title}{bold_close} | {assignee_short} | {wtype} | {state} |\n")
             f.write("\n")
 
     print(f"  weekly note: {filepath}")
@@ -579,7 +682,7 @@ def main():
         export_ado_wiki(con, project, vault_path, obsidian_vault)
 
     print("Generating weekly note...")
-    generate_weekly_note(con, projects, obsidian_vault, my_name)
+    generate_weekly_note(con, projects, obsidian_vault, my_name, obs["my_name_ado"])
 
     print("Done.")
 
