@@ -136,9 +136,10 @@ def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False) -> None:
         return
     logger.info("[%s] Starting Azure DevOps wiki ingestion", project.name)
     refresh = "drop_resources" if drop_existing else None
+    all_wiki_projects = [project.ado_project] + project.ado_extra_wiki_projects
     source = azure_devops_wiki_source(
         org_url=project.ado_org_url,
-        project=project.ado_project,
+        project=all_wiki_projects,
         wiki_name=project.ado_wiki_name,
         pat=project.ado_pat,
     )
