@@ -17,10 +17,11 @@ secrets.toml structure:
     # confluence_expand  = "body.storage,space,metadata.labels,ancestors,version"
 
     # Azure DevOps wiki (optional — omit if not using ADO)
-    # ado_org_url   = "https://dev.azure.com/your-org"
-    # ado_project   = "your-project"
-    # ado_wiki_name = "your-wiki"   # leave out to ingest all wikis
-    # ado_pat       = "YOUR_PERSONAL_ACCESS_TOKEN"  # Wiki (Read) scope
+    # ado_org_url              = "https://dev.azure.com/your-org"
+    # ado_project              = "your-project"
+    # ado_wiki_name            = "your-wiki"   # leave out to ingest all wikis
+    # ado_pat                  = "YOUR_PERSONAL_ACCESS_TOKEN"  # Wiki (Read) scope
+    # ado_extra_wiki_projects  = "CBF,RAFO"    # comma-separated or TOML array
 
     # Obsidian export (optional)
     # obsidian_vault_path = "folder/inside/vault"
@@ -54,6 +55,8 @@ class ProjectConfig:
     ado_project: str | None = field(default=None)
     ado_wiki_name: str | None = field(default=None)
     ado_pat: str | None = field(default=None)
+    # Additional ADO projects whose wikis should be merged into the same dataset
+    ado_extra_wiki_projects: list[str] = field(default_factory=list)
     # Obsidian export — optional
     obsidian_vault_path: str | None = field(default=None)
     obsidian_label: str | None = field(default=None)
@@ -74,6 +77,15 @@ class ProjectConfig:
     @property
     def ado_dataset(self) -> str:
         return f"{self.name}_ado_wiki"
+
+
+def _parse_list(value: str | list | None) -> list[str]:
+    """Accept a comma-separated string or a TOML array and return a list of strings."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [v.strip() for v in str(value).split(",") if v.strip()]
 
 
 def load_project(name: str) -> ProjectConfig:
@@ -97,6 +109,7 @@ def load_project(name: str) -> ProjectConfig:
         ado_project=secrets.get("ado_project"),
         ado_wiki_name=secrets.get("ado_wiki_name"),
         ado_pat=secrets.get("ado_pat"),
+        ado_extra_wiki_projects=_parse_list(secrets.get("ado_extra_wiki_projects", "")),
         obsidian_vault_path=secrets.get("obsidian_vault_path"),
         obsidian_label=secrets.get("obsidian_label"),
     )
