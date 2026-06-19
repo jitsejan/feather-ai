@@ -5,20 +5,29 @@ description = "Local-first knowledge engine for Confluence data"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "dagster",
-    "dagster-dbt",
-    "dagster-dlt",
-    "dagster-webserver",
     "dlt[duckdb,parquet]",
-    "dbt-duckdb",
     "motherduck",
     "requests",
+    "html2text>=2025.4.15",
+    "markdownify>=1.2.2",
+]
+
+[project.optional-dependencies]
+ml = [
     "sentence-transformers",
     "transformers",
     "torch",
     "accelerate",
-    "html2text>=2025.4.15",
-    "markdownify>=1.2.2",
+]
+orchestration = [
+    "dagster",
+    "dagster-dbt",
+    "dagster-dlt",
+    "dagster-webserver",
+    "dbt-duckdb",
+]
+all = [
+    "feather-ai[ml,orchestration]",
 ]
 
 [tool.hatch.build.targets.wheel]

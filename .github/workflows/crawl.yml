@@ -1,0 +1,86 @@
+name: Feather-AI Crawl
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # every Monday at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: 'Project names (space-separated) or "all"'
+        default: all
+        required: false
+      source:
+        description: 'Source to crawl'
+        default: all
+        required: false
+        type: choice
+        options: [all, confluence, jira, ado_wiki]
+
+# Prevent overlapping runs of the same workflow
+concurrency:
+  group: crawl-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Determine which projects to crawl ───────────────────────────────────────
+  setup:
+    name: Resolve project list
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - id: matrix
+        name: Build project matrix
+        run: |
+          INPUT="${{ inputs.projects || 'all' }}"
+          if [ "$INPUT" = "all" ]; then
+            # vars.PROJECT_NAMES: space-separated list set in
+            # GitHub → Settings → Variables → Actions (e.g. "acme globex")
+            NAMES="${{ vars.PROJECT_NAMES }}"
+          else
+            NAMES="$INPUT"
+          fi
+          if [ -z "$NAMES" ]; then
+            echo "::error::No project names found. Set the PROJECT_NAMES Actions variable."
+            exit 1
+          fi
+          JSON=$(echo "$NAMES" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -sc .)
+          echo "Projects to crawl: $JSON"
+          echo "value=$JSON" >> "$GITHUB_OUTPUT"
+
+  # ── Run one job per project (parallel) ──────────────────────────────────────
+  crawl:
+    name: Crawl / ${{ matrix.project }}
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: ${{ fromJson(needs.setup.outputs.matrix) }}
+      fail-fast: false  # one project failing does not cancel the others
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      - name: Write .dlt/secrets.toml
+        # Store the full secrets.toml contents in GitHub secret DLT_SECRETS_TOML
+        run: |
+          mkdir -p .dlt
+          printf '%s' "$DLT_SECRETS_TOML" > .dlt/secrets.toml
+        env:
+          DLT_SECRETS_TOML: ${{ secrets.DLT_SECRETS_TOML }}
+
+      - name: Run pipeline
+        run: |
+          SOURCE="${{ inputs.source }}"
+          ARGS="--project ${{ matrix.project }}"
+          if [ -n "$SOURCE" ] && [ "$SOURCE" != "all" ]; then
+            ARGS="$ARGS --source $SOURCE"
+          fi
+          python pipeline.py $ARGS
