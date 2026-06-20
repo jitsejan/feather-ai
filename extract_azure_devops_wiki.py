@@ -172,51 +172,55 @@ def download_ado_attachment(
 # ---------------------------------------------------------------------------
 
 @dlt.resource(name="pages", write_disposition="replace")
-def _ado_wiki_pages(org_url: str, project: str, wiki_name: str | None, pat: str) -> Iterator[dict]:
+def _ado_wiki_pages(org_url: str, projects: list[str], wiki_name: str | None, pat: str) -> Iterator[dict]:
     headers = _auth_header(pat)
-    for wiki in _resolve_wikis(org_url, project, wiki_name, headers):
-        wiki_id = wiki["id"]
-        wiki_display_name = wiki.get("name", wiki_id)
-        logger.info("Processing wiki '%s' (%s)", wiki_display_name, wiki_id)
+    for project in projects:
+        for wiki in _resolve_wikis(org_url, project, wiki_name, headers):
+            wiki_id = wiki["id"]
+            wiki_display_name = wiki.get("name", wiki_id)
+            logger.info("Processing wiki '%s' (%s) in project '%s'", wiki_display_name, wiki_id, project)
 
-        page_stubs = _list_wiki_pages(org_url, project, wiki_id, headers)
-        logger.info("Found %d page(s) in wiki '%s'", len(page_stubs), wiki_display_name)
+            page_stubs = _list_wiki_pages(org_url, project, wiki_id, headers)
+            logger.info("Found %d page(s) in wiki '%s'", len(page_stubs), wiki_display_name)
 
-        for stub in page_stubs:
-            page_path = stub.get("path", "")
-            content = _get_page_content(org_url, project, wiki_id, page_path, headers)
-            yield {
-                "id": f"{wiki_id}:{page_path}",
-                "wiki_id": wiki_id,
-                "wiki_name": wiki_display_name,
-                "repo_id": wiki.get("repositoryId", ""),
-                "path": page_path,
-                "title": page_path.rstrip("/").split("/")[-1] or wiki_display_name,
-                "content": content,
-                "order": stub.get("order", 0),
-                "is_parent_page": bool(stub.get("subPages")),
-                "remote_url": stub.get("remoteUrl", ""),
-                "git_item_path": stub.get("gitItemPath", ""),
-            }
+            for stub in page_stubs:
+                page_path = stub.get("path", "")
+                content = _get_page_content(org_url, project, wiki_id, page_path, headers)
+                yield {
+                    "id": f"{project}:{wiki_id}:{page_path}",
+                    "ado_project": project,
+                    "wiki_id": wiki_id,
+                    "wiki_name": wiki_display_name,
+                    "repo_id": wiki.get("repositoryId", ""),
+                    "path": page_path,
+                    "title": page_path.rstrip("/").split("/")[-1] or wiki_display_name,
+                    "content": content,
+                    "order": stub.get("order", 0),
+                    "is_parent_page": bool(stub.get("subPages")),
+                    "remote_url": stub.get("remoteUrl", ""),
+                    "git_item_path": stub.get("gitItemPath", ""),
+                }
 
 
 @dlt.resource(name="attachments", write_disposition="replace")
-def _ado_wiki_attachments(org_url: str, project: str, wiki_name: str | None, pat: str) -> Iterator[dict]:
+def _ado_wiki_attachments(org_url: str, projects: list[str], wiki_name: str | None, pat: str) -> Iterator[dict]:
     headers = _auth_header(pat)
-    for wiki in _resolve_wikis(org_url, project, wiki_name, headers):
-        wiki_display_name = wiki.get("name", wiki["id"])
-        attachments = _list_attachments(org_url, project, wiki, headers)
-        logger.info("Found %d attachment(s) in wiki '%s'", len(attachments), wiki_display_name)
-        for att in attachments:
-            yield {
-                "id": f"{wiki['id']}:{att['name']}",
-                "wiki_id": wiki["id"],
-                "wiki_name": wiki_display_name,
-                "repo_id": att["repo_id"],
-                "git_path": att["git_path"],
-                "name": att["name"],
-                "download_url": att["url"],
-            }
+    for project in projects:
+        for wiki in _resolve_wikis(org_url, project, wiki_name, headers):
+            wiki_display_name = wiki.get("name", wiki["id"])
+            attachments = _list_attachments(org_url, project, wiki, headers)
+            logger.info("Found %d attachment(s) in wiki '%s'", len(attachments), wiki_display_name)
+            for att in attachments:
+                yield {
+                    "id": f"{project}:{wiki['id']}:{att['name']}",
+                    "ado_project": project,
+                    "wiki_id": wiki["id"],
+                    "wiki_name": wiki_display_name,
+                    "repo_id": att["repo_id"],
+                    "git_path": att["git_path"],
+                    "name": att["name"],
+                    "download_url": att["url"],
+                }
 
 
 # ---------------------------------------------------------------------------
@@ -226,17 +230,23 @@ def _ado_wiki_attachments(org_url: str, project: str, wiki_name: str | None, pat
 @dlt.source
 def azure_devops_wiki_source(
     org_url: str | None = None,
-    project: str | None = None,
+    project: str | list[str] | None = None,
     wiki_name: str | None = None,
     pat: str | None = None,
 ):
     """dlt source for Azure DevOps wiki pages and attachments.
 
-    All parameters are read from per-project secrets when not passed directly.
+    `project` can be a single project name or a list of project names — all
+    wikis are merged into the same pages/attachments tables, differentiated by
+    the `ado_project` column.
     """
     org_url = (org_url or "").rstrip("/")
-    yield _ado_wiki_pages(org_url, project, wiki_name, pat)
-    yield _ado_wiki_attachments(org_url, project, wiki_name, pat)
+    if isinstance(project, str):
+        projects = [project]
+    else:
+        projects = list(project or [])
+    yield _ado_wiki_pages(org_url, projects, wiki_name, pat)
+    yield _ado_wiki_attachments(org_url, projects, wiki_name, pat)
 
 
 def ado_wiki_source():
