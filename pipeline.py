@@ -41,15 +41,16 @@ def configure_logging(log_level: str = "INFO", dlt_log_level: str = "WARNING") -
         logging.getLogger(name).setLevel(noisy_level)
 
 
-def _destination():
+def _destination(local: bool = False):
     """Return MotherDuck destination if configured, else local DuckDB."""
-    try:
-        credentials = dlt.secrets["destination.motherduck.credentials"]
-        from dlt.destinations import motherduck
-        logger.debug("Using MotherDuck destination")
-        return motherduck(credentials)
-    except KeyError:
-        pass
+    if not local:
+        try:
+            credentials = dlt.secrets["destination.motherduck.credentials"]
+            from dlt.destinations import motherduck
+            logger.debug("Using MotherDuck destination")
+            return motherduck(credentials)
+        except KeyError:
+            pass
 
     try:
         credentials = dlt.secrets["destination.duckdb.credentials"]
@@ -73,7 +74,7 @@ def _confluence_processed(project: ProjectConfig):
     return pages | process_pages, pages | process_hierarchy
 
 
-def run_confluence(project: ProjectConfig, drop_existing: bool = False) -> None:
+def run_confluence(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
     if not project.base_url or not project.confluence_space_key:
         logger.info("[%s] No Confluence config — skipping", project.name)
         return
@@ -84,7 +85,7 @@ def run_confluence(project: ProjectConfig, drop_existing: bool = False) -> None:
     refresh = "drop_resources" if drop_existing else None
     pipeline = dlt.pipeline(
         pipeline_name=f"{project.name}_confluence",
-        destination=_destination(),
+        destination=_destination(local=local),
         dataset_name=project.confluence_dataset,
         refresh=refresh,
     )
@@ -106,7 +107,7 @@ def _jira_processed(project: ProjectConfig):
     return issues | process_issues
 
 
-def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
+def run_jira(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
     if not project.base_url or not project.jira_board_id:
         logger.info("[%s] No Jira config — skipping", project.name)
         return
@@ -117,7 +118,7 @@ def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
     refresh = "drop_resources" if drop_existing else None
     pipeline = dlt.pipeline(
         pipeline_name=f"{project.name}_jira",
-        destination=_destination(),
+        destination=_destination(local=local),
         dataset_name=project.jira_dataset,
         refresh=refresh,
     )
@@ -130,7 +131,7 @@ def run_jira(project: ProjectConfig, drop_existing: bool = False) -> None:
 # Azure DevOps Wiki
 # ---------------------------------------------------------------------------
 
-def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False) -> None:
+def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
     if not project.has_ado:
         logger.info("[%s] No ADO config — skipping Azure DevOps wiki ingestion", project.name)
         return
@@ -145,7 +146,7 @@ def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False) -> None:
     )
     pipeline = dlt.pipeline(
         pipeline_name=f"{project.name}_ado_wiki",
-        destination=_destination(),
+        destination=_destination(local=local),
         dataset_name=project.ado_dataset,
         refresh=refresh,
     )
@@ -170,6 +171,8 @@ def _parse_args():
         help="Which source to ingest (default: all)",
     )
     parser.add_argument("--drop-existing", action="store_true")
+    parser.add_argument("--local", action="store_true",
+                        help="Force local DuckDB destination (skip MotherDuck)")
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--dlt-log-level", default="WARNING",
@@ -177,13 +180,13 @@ def _parse_args():
     return parser.parse_args()
 
 
-def run_project(project: ProjectConfig, source: str | None, drop_existing: bool) -> None:
+def run_project(project: ProjectConfig, source: str | None, drop_existing: bool, local: bool = False) -> None:
     if source in (None, "confluence"):
-        run_confluence(project, drop_existing=drop_existing)
+        run_confluence(project, drop_existing=drop_existing, local=local)
     if source in (None, "jira"):
-        run_jira(project, drop_existing=drop_existing)
+        run_jira(project, drop_existing=drop_existing, local=local)
     if source in (None, "ado_wiki"):
-        run_ado_wiki(project, drop_existing=drop_existing)
+        run_ado_wiki(project, drop_existing=drop_existing, local=local)
 
 
 if __name__ == "__main__":
@@ -192,4 +195,4 @@ if __name__ == "__main__":
 
     projects = load_all_projects() if args.all else [load_project(args.project)]
     for project in projects:
-        run_project(project, source=args.source, drop_existing=args.drop_existing)
+        run_project(project, source=args.source, drop_existing=args.drop_existing, local=args.local)
