@@ -1,4 +1,5 @@
 import dlt
+import os
 from collections.abc import Mapping
 from html import unescape
 import logging
@@ -235,3 +236,49 @@ def process_hierarchy(page):
             }
     if not yielded:
         logger.debug("Skipping non-page item in process_hierarchy")
+
+
+def build_comment_record(comment, page_id):
+    body_html = comment.get("body", {}).get("storage", {}).get("value", "")
+    version = comment.get("version", {})
+    history = comment.get("history", {})
+    created_by = history.get("createdBy", {})
+    return {
+        "id": comment["id"],
+        "page_id": page_id,
+        "author_display_name": created_by.get("displayName", ""),
+        "author_email": created_by.get("email", ""),
+        "created": history.get("createdDate", ""),
+        "updated": version.get("when", ""),
+        "body_text": confluence_storage_to_text(body_html),
+        "body_html": body_html,
+    }
+
+
+@dlt.transformer(primary_key="id", write_disposition="merge")
+def process_comments(page):
+    username = dlt.secrets["sources.atlassian_confluence.username"]
+    password = dlt.secrets["sources.atlassian_confluence.password"]
+    base_url = os.environ.get("SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL", "")
+
+    client = RESTClient(
+        base_url=f"{base_url}/wiki/rest/api",
+        auth=HttpBasicAuth(username, password),
+        paginator=OffsetPaginator(
+            limit=PAGE_LIMIT,
+            offset_param="start",
+            limit_param="limit",
+            total_path=None,
+            stop_after_empty_page=True,
+        ),
+    )
+
+    for page_payload in _iter_page_payloads(page):
+        page_id = page_payload["id"]
+        for batch in client.paginate(
+            f"content/{page_id}/child/comment",
+            params={"expand": "body.storage,version,history", "depth": "all"},
+            data_selector="results",
+        ):
+            for comment in batch:
+                yield build_comment_record(comment, page_id)
