@@ -21,7 +21,7 @@ from io import StringIO
 import dlt
 from dlt.destinations import duckdb
 
-from extract_confluence import atlassian_confluence_source, process_pages, process_hierarchy
+from extract_confluence import atlassian_confluence_source, process_pages, process_hierarchy, process_comments
 from extract_jira import jira_source, process_issues
 from extract_azure_devops_wiki import azure_devops_wiki_source
 from project_config import ProjectConfig, load_project, load_all_projects
@@ -71,7 +71,7 @@ def _confluence_processed(project: ProjectConfig):
         space_key=project.confluence_space_key,
         expand=project.confluence_expand,
     ).pages
-    return pages | process_pages, pages | process_hierarchy
+    return pages | process_pages, pages | process_hierarchy, pages | process_comments
 
 
 def run_confluence(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
