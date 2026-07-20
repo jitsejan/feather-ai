@@ -57,14 +57,24 @@ class ProjectConfig:
     ado_pat: str | None = field(default=None)
     # Additional ADO projects whose wikis should be merged into the same dataset
     ado_extra_wiki_projects: list[str] = field(default_factory=list)
+    # Azure DevOps boards — all optional
+    ado_boards_project: str | None = field(default=None)
+    ado_boards_team: str | None = field(default=None)
+    ado_boards_sprint: str | None = field(default=None)
+    ado_boards_all_sprints: bool = field(default=False)
     # Obsidian export — optional
     obsidian_vault_path: str | None = field(default=None)
     obsidian_label: str | None = field(default=None)
 
     @property
     def has_ado(self) -> bool:
-        """True when the minimum ADO config (org_url, project, pat) is present."""
+        """True when the minimum ADO wiki config is present."""
         return bool(self.ado_org_url and self.ado_project and self.ado_pat)
+
+    @property
+    def has_ado_boards(self) -> bool:
+        """True when the minimum ADO boards config is present."""
+        return bool(self.ado_org_url and self.ado_boards_project and self.ado_boards_team and self.ado_pat)
 
     @property
     def confluence_dataset(self) -> str:
@@ -77,6 +87,10 @@ class ProjectConfig:
     @property
     def ado_dataset(self) -> str:
         return f"{self.name}_ado_wiki"
+
+    @property
+    def ado_boards_dataset(self) -> str:
+        return f"{self.name}_ado_boards"
 
 
 def _parse_list(value: str | list | None) -> list[str]:
@@ -110,6 +124,10 @@ def load_project(name: str) -> ProjectConfig:
         ado_wiki_name=secrets.get("ado_wiki_name"),
         ado_pat=secrets.get("ado_pat"),
         ado_extra_wiki_projects=_parse_list(secrets.get("ado_extra_wiki_projects", "")),
+        ado_boards_project=secrets.get("ado_boards_project"),
+        ado_boards_team=secrets.get("ado_boards_team"),
+        ado_boards_sprint=secrets.get("ado_boards_sprint"),
+        ado_boards_all_sprints=bool(secrets.get("ado_boards_all_sprints", False)),
         obsidian_vault_path=secrets.get("obsidian_vault_path"),
         obsidian_label=secrets.get("obsidian_label"),
     )
@@ -128,7 +146,10 @@ def load_all_projects() -> list[ProjectConfig]:
 def load_obsidian_config() -> dict:
     """Return global Obsidian settings from secrets.toml [obsidian]."""
     cfg = dlt.secrets.get("obsidian") or {}
+    my_name = cfg.get("my_name", "")
     return {
         "vault": cfg.get("vault", ""),
-        "my_name": cfg.get("my_name", ""),
+        "my_name": my_name,
+        # ADO may use a different display name — falls back to my_name if not set
+        "my_name_ado": cfg.get("my_name_ado", my_name),
     }
