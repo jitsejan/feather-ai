@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import logging
 import os
+import sys
 from io import StringIO
 
 import dlt
@@ -29,14 +30,84 @@ from project_config import ProjectConfig, load_project, load_all_projects
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Coloured logging
+# ---------------------------------------------------------------------------
+
+_RESET   = "\033[0m"
+_BOLD    = "\033[1m"
+_DIM     = "\033[2m"
+_RED     = "\033[31m"
+_GREEN   = "\033[32m"
+_YELLOW  = "\033[33m"
+_BLUE    = "\033[34m"
+_MAGENTA = "\033[35m"
+_CYAN    = "\033[36m"
+
+_LEVEL_COLORS = {
+    "DEBUG":    _BLUE,
+    "INFO":     _GREEN,
+    "WARNING":  _YELLOW,
+    "ERROR":    _RED,
+    "CRITICAL": _BOLD + _RED,
+}
+
+_SOURCE_COLORS = {
+    "confluence": _BLUE,
+    "jira":       _YELLOW,
+    "ado_wiki":   _MAGENTA,
+}
+
+
+class _ColorFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        if not (hasattr(sys.stderr, "isatty") and sys.stderr.isatty()):
+            self._style._fmt = "%(asctime)s %(levelname)-8s %(message)s"
+            return super().format(record)
+
+        level_color = _LEVEL_COLORS.get(record.levelname, "")
+        asctime = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
+        msg = record.getMessage()
+
+        # Highlight [project/source] tags
+        import re
+        msg = re.sub(
+            r"\[([^\]/]+)/([^\]]+)\]",
+            lambda m: f"{_CYAN}{_BOLD}[{m.group(1)}]{_RESET}{_SOURCE_COLORS.get(m.group(2), '')}/{m.group(2)}{_RESET}",
+            msg,
+        )
+        msg = re.sub(r"\[([^\]]+)\]", f"{_CYAN}{_BOLD}[\\1]{_RESET}", msg)
+
+        return (
+            f"{_DIM}{asctime}{_RESET}  "
+            f"{level_color}{record.levelname:<8}{_RESET}  "
+            f"{msg}"
+        )
+
+
+def _banner(project_name: str, sources: list[str]) -> None:
+    width = 52
+    is_tty = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+    if is_tty:
+        line  = f"{_CYAN}{'━' * width}{_RESET}"
+        title = f"{_CYAN}{_BOLD}  {project_name.upper()}{_RESET}"
+        src   = f"{_DIM}  sources: {', '.join(sources)}{_RESET}"
+    else:
+        line  = "─" * width
+        title = f"  {project_name.upper()}"
+        src   = f"  sources: {', '.join(sources)}"
+    print(f"\n{line}", file=sys.stderr)
+    print(title, file=sys.stderr)
+    print(src, file=sys.stderr)
+    print(f"{line}", file=sys.stderr)
+
 
 def configure_logging(log_level: str = "INFO", dlt_log_level: str = "WARNING") -> None:
     os.environ["DLT_LOG_LEVEL"] = dlt_log_level.upper()
     level = getattr(logging, log_level.upper(), logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s",
-    )
+    handler = logging.StreamHandler()
+    handler.setFormatter(_ColorFormatter())
+    logging.basicConfig(level=level, handlers=[handler])
     noisy_level = max(level, logging.WARNING)
     for name in ["dlt", "dlt.sources", "dlt.pipeline", "dlt.destinations", "urllib3", "requests"]:
         logging.getLogger(name).setLevel(noisy_level)
@@ -77,9 +148,9 @@ def _confluence_processed(project: ProjectConfig):
 
 def run_confluence(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
     if not project.base_url or not project.confluence_space_key:
-        logger.info("[%s] No Confluence config — skipping", project.name)
+        logger.info("[%s/confluence] No config — skipping", project.name)
         return
-    logger.info("[%s] Starting Confluence ingestion", project.name)
+    logger.info("[%s/confluence] Starting ingestion (space: %s)", project.name, project.confluence_space_key)
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
@@ -92,7 +163,7 @@ def run_confluence(project: ProjectConfig, drop_existing: bool = False, local: b
     )
     with contextlib.redirect_stdout(StringIO()), contextlib.redirect_stderr(StringIO()):
         load_info = pipeline.run(_confluence_processed(project), refresh=refresh)
-    logger.info("[%s] Confluence done: %s", project.name, load_info)
+    logger.info("[%s/confluence] Done — %s", project.name, load_info)
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +181,9 @@ def _jira_processed(project: ProjectConfig):
 
 def run_jira(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
     if not project.base_url or not project.jira_board_id:
-        logger.info("[%s] No Jira config — skipping", project.name)
+        logger.info("[%s/jira] No config — skipping", project.name)
         return
-    logger.info("[%s] Starting Jira ingestion", project.name)
+    logger.info("[%s/jira] Starting ingestion (board: %s)", project.name, project.jira_board_id)
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
     os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
@@ -125,7 +196,7 @@ def run_jira(project: ProjectConfig, drop_existing: bool = False, local: bool = 
     )
     with contextlib.redirect_stdout(StringIO()), contextlib.redirect_stderr(StringIO()):
         load_info = pipeline.run(_jira_processed(project), refresh=refresh)
-    logger.info("[%s] Jira done: %s", project.name, load_info)
+    logger.info("[%s/jira] Done — %s", project.name, load_info)
 
 
 # ---------------------------------------------------------------------------
@@ -134,9 +205,9 @@ def run_jira(project: ProjectConfig, drop_existing: bool = False, local: bool = 
 
 def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
     if not project.has_ado:
-        logger.info("[%s] No ADO config — skipping Azure DevOps wiki ingestion", project.name)
+        logger.info("[%s/ado_wiki] No config — skipping", project.name)
         return
-    logger.info("[%s] Starting Azure DevOps wiki ingestion", project.name)
+    logger.info("[%s/ado_wiki] Starting ingestion (org: %s)", project.name, project.ado_org_url)
     refresh = "drop_resources" if drop_existing else None
     all_wiki_projects = [project.ado_project] + project.ado_extra_wiki_projects
     source = azure_devops_wiki_source(
@@ -153,7 +224,7 @@ def run_ado_wiki(project: ProjectConfig, drop_existing: bool = False, local: boo
     )
     with contextlib.redirect_stdout(StringIO()), contextlib.redirect_stderr(StringIO()):
         load_info = pipeline.run(source, refresh=refresh)
-    logger.info("[%s] ADO wiki done: %s", project.name, load_info)
+    logger.info("[%s/ado_wiki] Done — %s", project.name, load_info)
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +282,11 @@ def _parse_args():
 
 
 def run_project(project: ProjectConfig, source: str | None, drop_existing: bool, local: bool = False) -> None:
+    sources = (
+        [source] if source
+        else [s for s in ("confluence", "jira", "ado_wiki")]
+    )
+    _banner(project.name, sources)
     if source in (None, "confluence"):
         run_confluence(project, drop_existing=drop_existing, local=local)
     if source in (None, "jira"):
