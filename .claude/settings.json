@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__query",
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__query_rw",
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__list_databases",
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__list_tables",
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__list_columns",
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__list_views",
+      "mcp__c3e41133-41a3-4d77-acb1-8a98c3668aff__search_catalog",
+      "mcp__MotherDuck__query",
+      "mcp__MotherDuck__query_rw",
+      "mcp__MotherDuck__list_databases",
+      "mcp__MotherDuck__list_tables",
+      "mcp__MotherDuck__list_columns",
+      "mcp__MotherDuck__list_views",
+      "mcp__MotherDuck__search_catalog"
+    ]
+  }
+}
