@@ -1,0 +1,23 @@
+[project]
+name = "agile-ai"
+version = "0.1.0"
+description = "AI-powered Agile & DevOps insights."
+requires-python = ">=3.11"
+dependencies = [
+    "dbt-duckdb>=1.9.6",
+    "dlt[duckdb,motherduck,parquet]>=0.5.1",
+    "duckdb>=1.4.1",
+    "requests>=2.31",
+    "tomli>=2.3.0",
+]
+
+[project.scripts]
+# Expose a runnable entrypoint so `uv run jira_pipeline` can invoke the
+# package-level callable. This maps the script name `jira_pipeline` to
+# the `main` function in `jira_pipeline.py`.
+jira_pipeline = "jira_pipeline:main"
+dbt = "dbt.cli.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,24 @@
+services:
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    container_name: superset
+    ports:
+      - "8088:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=${SUPERSET_SECRET_KEY:-your-secret-key-change-this-in-production}
+      - MOTHERDUCK_TOKEN=${MOTHERDUCK_TOKEN}
+    volumes:
+      - ./superset:/app/superset
+      - superset_db:/app/superset_home
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  superset_db:
+

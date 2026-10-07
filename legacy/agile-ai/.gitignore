@@ -1,0 +1,52 @@
+# Virtual environments
+.venv/
+
+# Byte-compiled / cache
+__pycache__/
+*.pyc
+
+# DLT secrets - keep local only
+.dlt/secrets.toml
+
+# Config with sensitive company information
+config/integrations.toml
+
+# Typical local IDE files
+.vscode/
+# ignore secrets, virtual environments and typical python compilation artifacts
+secrets.toml
+*.secrets.toml
+# ignore pinned profile name
+.dlt/profile-name
+# ignore default working dir
+.dlt/.var
+# ignore default local dir (loaded data)
+_local
+# ignore basic python artifacts
+.env
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+# ignore duckdb
+*.duckdb
+*.wal
+
+# Project-specific
+jira_pipeline.duckdb
+uv.lock
+.DS_Store
+
+.idea/
+logs/dbt.log
+transform/logs
+transform/target
+transform/.user.yml
+transform/seeds/jira_config.csv
+dashboards/.evidence/customization/.profile.json
+dashboards/pages/logs
+dashboards/sources/motherduck/connection.yaml
+
+# Superset
+superset/superset_home/
+superset/*.db
+superset/*.log
