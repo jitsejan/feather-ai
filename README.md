@@ -86,4 +86,4 @@ Optional env vars:
 
 ## Legacy: agile-ai
 
-[`legacy/agile-ai/`](legacy/agile-ai/) contains the former [agile-ai](https://github.com/jitsejan/agile-ai) repo (Jira analytics with dlt, dbt, Evidence and Superset), merged in with its full git history. Run `git log -- legacy/agile-ai` to browse it. The original repo is archived.
+[`legacy/agile-ai/`](legacy/agile-ai/) contains the former agile-ai repo (Jira analytics with dlt, dbt, Evidence and Superset), merged in with its full git history. Run `git log -- legacy/agile-ai` to browse it. The original repo has been deleted.
