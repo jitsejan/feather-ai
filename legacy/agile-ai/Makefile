@@ -48,6 +48,56 @@ evidence-build:
 evidence-preview:
 	cd $(EVIDENCE_DIR) && npm run preview
 
+# Superset commands
+superset-up:
+	docker-compose up -d superset
+	@echo "✅ Superset starting at http://localhost:8088"
+	@echo "   Wait ~60 seconds for initialization, then run: make superset-init"
+
+superset-down:
+	docker-compose down
+
+superset-logs:
+	docker-compose logs -f superset
+
+superset-init:
+	docker-compose exec superset superset db upgrade
+	docker-compose exec superset superset fab create-admin \
+		--username admin \
+		--firstname Admin \
+		--lastname User \
+		--email admin@example.com \
+		--password admin || true
+	docker-compose exec superset superset init
+	@echo "✅ Superset initialized! Access at http://localhost:8088 (admin/admin)"
+
+superset-restart:
+	docker-compose restart superset
+
+superset-import:
+	@echo "Importing dashboards and creating datasets..."
+	@uv run python superset/import_dashboards.py || echo "💡 Make sure Superset is running and database is connected"
+
+superset-fix-charts:
+	@echo "Fixing chart configurations..."
+	@uv run python superset/fix_charts.py || echo "💡 Make sure Superset is running"
+
+superset-fix-dashboards:
+	@echo "Fixing dashboard layouts..."
+	@uv run python superset/fix_dashboard_layout.py || echo "💡 Make sure Superset is running"
+
+superset-rebuild-dashboards:
+	@echo "Rebuilding dashboards from scratch..."
+	@uv run python superset/rebuild_dashboards.py || echo "💡 Make sure Superset is running"
+
+superset-fix-viz-types:
+	@echo "Fixing chart visualization types..."
+	@uv run python superset/fix_chart_viz_types.py || echo "💡 Make sure Superset is running"
+
+superset-fix-all-charts:
+	@echo "⚠️  This will DELETE and RECREATE all charts with proper config..."
+	@uv run python superset/fix_all_charts.py || echo "💡 Make sure Superset is running"
+
 # Convenience commands
 all: dbt-run evidence-dev
 
@@ -75,6 +125,13 @@ help:
 	@echo "  make dbt-build         - Build and test models"
 	@echo "  make dbt-debug         - Debug dbt configuration"
 	@echo "  make dbt-clean         - Clean dbt artifacts"
+	@echo ""
+	@echo "📈 Superset Dashboard:"
+	@echo "  make superset-up       - Start Superset (Docker)"
+	@echo "  make superset-down     - Stop Superset"
+	@echo "  make superset-init     - Initialize Superset (first time)"
+	@echo "  make superset-logs     - View Superset logs"
+	@echo "  make superset-restart  - Restart Superset"
 	@echo ""
 	@echo "⚡ Convenience:"
 	@echo "  make refresh           - Fetch Jira data + run dbt"

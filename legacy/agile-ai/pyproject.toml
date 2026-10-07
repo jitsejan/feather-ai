@@ -8,6 +8,7 @@ dependencies = [
     "dlt[duckdb,motherduck,parquet]>=0.5.1",
     "duckdb>=1.4.1",
     "requests>=2.31",
+    "tomli>=2.3.0",
 ]
 
 [project.scripts]

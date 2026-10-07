@@ -44,4 +44,6 @@ DEFAULT_ENDPOINTS = {
     },
 }
 
-DEFAULT_PAGE_SIZE = 100
+# Jira API allows up to 1000 results per page for search queries
+# Using 1000 reduces API calls and token usage significantly
+DEFAULT_PAGE_SIZE = 1000

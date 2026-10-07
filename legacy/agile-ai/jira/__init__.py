@@ -11,6 +11,7 @@ from .settings import DEFAULT_ENDPOINTS, DEFAULT_PAGE_SIZE
 import os
 import re
 import datetime
+import time
 import duckdb
 import logging
 
@@ -19,6 +20,13 @@ import logging
 # setting JIRA_DEBUG=1 in their environment or configure logging
 # externally in their application.
 logger = logging.getLogger(__name__)
+
+# Add console handler if not already present
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+    logger.addHandler(handler)
+
 if os.environ.get("JIRA_DEBUG"):
     logger.setLevel(logging.DEBUG)
 else:
@@ -38,73 +46,114 @@ def jira(
     subdomain: str = dlt.secrets.value,
     email: str = dlt.secrets.value,
     api_token: str = dlt.secrets.value,
+    project_key: str = "DT",
+    instance_name: str = None,
+    board_ids: List[int] = None,
     page_size: int = DEFAULT_PAGE_SIZE,
 ) -> Iterable[DltResource]:
     import os, re, datetime, duckdb
 
-    def _get_last_updated_from_duckdb(db_path: str = "jira_pipeline.duckdb") -> Optional[str]:
-        if not os.path.exists(db_path):
-            return None
+    # Use project_key as instance_name if not provided
+    if instance_name is None:
+        instance_name = project_key
+
+    def _get_last_updated_from_duckdb(project_key: str) -> Optional[str]:
+        """Get the last updated timestamp for a specific project from MotherDuck."""
+        logger.info(f"🔍 Checking for previous data for project {project_key}...")
         try:
-            conn = duckdb.connect(database=db_path, read_only=True)
-            candidates = [
-                "SELECT MAX(updated) FROM issues",
-                "SELECT MAX(updated) FROM jira.issues",
-                "SELECT MAX(updated) FROM \"jira\".issues",
-            ]
-            last = None
-            for q in candidates:
-                try:
-                    cur = conn.execute(q)
-                    val = cur.fetchone()
-                    if val and val[0] is not None:
-                        last = val[0]
-                        break
-                except Exception:
-                    continue
-            conn.close()
-            if last is None:
+            # Connect to MotherDuck using token from environment
+            motherduck_token = os.environ.get("MOTHERDUCK_TOKEN")
+            if not motherduck_token:
+                logger.warning("⚠️  MOTHERDUCK_TOKEN not set, skipping incremental update")
                 return None
+
+            logger.info(f"🔌 Connecting to MotherDuck (agile_ai_db)...")
+            conn = duckdb.connect(f"md:agile_ai_db?motherduck_token={motherduck_token}")
+
+            # Query for max updated timestamp for this specific project
+            # Extract project key from the issue key (e.g., "DT-123" -> "DT")
+            query = f"""
+                SELECT MAX(fields__updated)
+                FROM raw.issues
+                WHERE split_part(key, '-', 1) = '{project_key}'
+            """
+
+            try:
+                cur = conn.execute(query)
+                val = cur.fetchone()
+                last = val[0] if val and val[0] is not None else None
+            except Exception as e:
+                logger.warning(f"⚠️  Query failed: {e}")
+                last = None
+
+            conn.close()
+
+            if last is None:
+                logger.info(f"📥 No previous data found for project {project_key}, doing FULL fetch")
+                return None
+
+            # Convert to Jira's expected format
             if isinstance(last, (datetime.datetime, datetime.date)):
                 dt = last if isinstance(last, datetime.datetime) else datetime.datetime.combine(last, datetime.time())
-                return dt.strftime("%Y/%m/%d %H:%M")
+                result = dt.strftime("%Y/%m/%d %H:%M")
+                logger.info(f"✅ Found last update for {project_key}: {result} - doing INCREMENTAL fetch")
+                return result
+
             s = str(last)
             m = re.match(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})", s)
             if m:
-                return f"{m.group(1)}/{m.group(2)}/{m.group(3)} {m.group(4)}:{m.group(5)}"
+                result = f"{m.group(1)}/{m.group(2)}/{m.group(3)} {m.group(4)}:{m.group(5)}"
+                logger.info(f"✅ Found last update for {project_key}: {result} - doing INCREMENTAL fetch")
+                return result
+
             m = re.match(r"(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})", s)
             if m:
-                return f"{m.group(1)}/{m.group(2)}/{m.group(3)} {m.group(4)}:{m.group(5)}"
+                result = f"{m.group(1)}/{m.group(2)}/{m.group(3)} {m.group(4)}:{m.group(5)}"
+                logger.info(f"✅ Found last update for {project_key}: {result} - doing INCREMENTAL fetch")
+                return result
+
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"⚠️  Error getting last updated timestamp: {e}")
             return None
 
     resources = []
-    last_updated = _get_last_updated_from_duckdb()
+    last_updated = _get_last_updated_from_duckdb(project_key)
 
     # issues resource
     for endpoint_name, endpoint_parameters in DEFAULT_ENDPOINTS.items():
         ep_params = dict(endpoint_parameters.get("params", {}))
-        if endpoint_name == "issues" and last_updated:
-            base_project = ep_params.get("jql", "project = DT")
-            base = re.split(r"ORDER BY", base_project, flags=re.IGNORECASE)[0].strip()
-            incremental_jql = f"{base} AND updated >= \"{last_updated}\" ORDER BY updated DESC"
-            ep_params["jql"] = incremental_jql
+        if endpoint_name == "issues":
+            # Use the project_key parameter instead of hardcoded value
+            base_jql = f"project = {project_key} ORDER BY created DESC"
+            if last_updated:
+                base_jql = f"project = {project_key} AND updated >= \"{last_updated}\" ORDER BY updated DESC"
+            ep_params["jql"] = base_jql
         new_endpoint_parameters = dict(endpoint_parameters)
         new_endpoint_parameters["params"] = ep_params
-        # Use "replace" write disposition for issues to avoid duplicates
-        write_disp = "replace" if endpoint_name == "issues" else None
-        res_kwargs = {
-            **new_endpoint_parameters,
-            "subdomain": subdomain,
-            "email": email,
-            "api_token": api_token,
-            "page_size": page_size,
-        }
-        if write_disp:
-            res_function = dlt.resource(get_paginated_data, name=endpoint_name, write_disposition=write_disp)(**res_kwargs)
+        # Use "merge" write disposition for issues to update existing records
+        # This allows incremental updates based on primary key (id)
+        if endpoint_name == "issues":
+            res_function = dlt.resource(
+                get_paginated_data,
+                name=endpoint_name,
+                write_disposition="merge",
+                primary_key="id"
+            )(**{
+                **new_endpoint_parameters,
+                "subdomain": subdomain,
+                "email": email,
+                "api_token": api_token,
+                "page_size": page_size,
+            })
         else:
-            res_function = dlt.resource(get_paginated_data, name=endpoint_name)(**res_kwargs)
+            res_function = dlt.resource(get_paginated_data, name=endpoint_name)(**{
+                **new_endpoint_parameters,
+                "subdomain": subdomain,
+                "email": email,
+                "api_token": api_token,
+                "page_size": page_size,
+            })
         resources.append(res_function)
 
     # issue_histories resource
@@ -121,7 +170,7 @@ def jira(
             jql_queries = DEFAULT_ENDPOINTS.get("issues", {}).get("params", {}).get("jql", [])
         if fields is None:
             fields = DEFAULT_ENDPOINTS.get("issues", {}).get("params", {}).get("fields", [])
-        logger.debug("issue_histories resource called")
+        logger.info(f"\n🔄 Processing resource: issue_histories (extracting history from issues)")
         yielded = 0
         for jql in jql_queries if isinstance(jql_queries, list) else [jql_queries]:
             params = {"fields": fields, "jql": jql, "maxResults": page_size, "expand": "changelog,comment"}
@@ -164,6 +213,7 @@ def jira(
                                 "fromString": item.get("fromString"),
                                 "toString": item.get("toString"),
                             }
+        logger.info(f"✅ issue_histories: Extracted {yielded} history records")
         logger.debug("issue_histories yielded %s rows", yielded)
     resources.append(issue_histories)
 
@@ -181,6 +231,7 @@ def jira(
             jql_queries = DEFAULT_ENDPOINTS.get("issues", {}).get("params", {}).get("jql", [])
         if fields is None:
             fields = DEFAULT_ENDPOINTS.get("issues", {}).get("params", {}).get("fields", [])
+        logger.info(f"\n🔄 Processing resource: issue_comments (extracting comments from issues)")
         logger.debug("issue_comments resource called (per-issue API)")
         yielded = 0
         from .fetch_comments import fetch_issue_comments
@@ -201,6 +252,11 @@ def jira(
                         logger.debug("RAW ISSUE (issue_comments):\n%s", pprint.pformat(issue))
                     issue_id = issue.get("id")
                     issue_key = issue.get("key")
+                    
+                    # Small delay between issues to avoid rate limits
+                    if idx > 0:
+                        time.sleep(0.2)
+                    
                     for comment in fetch_issue_comments(subdomain, email, api_token, issue_id):
                         yielded += 1
                         if yielded <= 5:
@@ -214,6 +270,7 @@ def jira(
                             "updated": comment.get("updated"),
                             "body": comment.get("body"),
                         }
+        logger.info(f"✅ issue_comments: Extracted {yielded} comments")
         logger.debug("issue_comments yielded %s rows", yielded)
     resources.append(issue_comments)
 
@@ -231,6 +288,7 @@ def jira(
             jql_queries = DEFAULT_ENDPOINTS.get("issues", {}).get("params", {}).get("jql", [])
         if fields is None:
             fields = DEFAULT_ENDPOINTS.get("issues", {}).get("params", {}).get("fields", [])
+        logger.info(f"\n🔄 Processing resource: issue_sprints (extracting sprints from issues)")
         logger.debug("issue_sprints resource called")
         yielded = 0
         from .extract_sprints import extract_issue_sprints
@@ -260,6 +318,7 @@ def jira(
                             "issue_key": issue_key,
                             **sprint
                         }
+        logger.info(f"✅ issue_sprints: Extracted {yielded} sprint associations")
         logger.debug("issue_sprints yielded %s rows", yielded)
     resources.append(issue_sprints)
 
@@ -272,9 +331,19 @@ def jira(
         board_type: Optional[str] = None,
     ):
         from .fetch_sprints import fetch_boards, fetch_sprints_for_board
+        logger.info(f"\n🔄 Processing resource: all_sprints (fetching sprint definitions)")
         logger.debug("all_sprints resource called")
         yielded = 0
-        for board in fetch_boards(subdomain, email, api_token, board_type):
+
+        boards = list(fetch_boards(subdomain, email, api_token, board_type))
+
+        # Filter boards if board_ids specified
+        if board_ids:
+            logger.info(f"Filtering boards to only include IDs: {board_ids}")
+            boards = [b for b in boards if b.get("id") in board_ids]
+            logger.info(f"Found {len(boards)} board(s) matching the specified IDs")
+
+        for board in boards:
             board_id = board.get("id")
             board_name = board.get("name")
             for sprint in fetch_sprints_for_board(subdomain, email, api_token, board_id):
@@ -286,6 +355,7 @@ def jira(
                     "board_name": board_name,
                     **sprint
                 }
+        logger.info(f"✅ all_sprints: Fetched {yielded} sprint definitions")
         logger.debug("all_sprints yielded %s rows", yielded)
     resources.append(all_sprints)
 
@@ -351,14 +421,19 @@ def get_paginated_data(
         if expand:
             expand_str = ",".join(expand) if isinstance(expand, (list, tuple)) else expand
 
-        # Build base payload (don't include maxResults - let API use default per page)
-        payload = {"jql": jql, "fields": fields}
+        # Build base payload with maxResults to reduce API calls
+        # Jira allows up to 1000 results per page for search/jql endpoint
+        payload = {"jql": jql, "fields": fields, "maxResults": page_size}
         if expand_str:
             payload["expand"] = expand_str
+
+        # Log JQL query
+        logger.info(f"📋 JQL Query: {jql}")
 
         # Paginate through all results using token-based pagination
         next_page_token = None
         page_num = 0
+        total_fetched = 0
 
         while True:
             page_num += 1
@@ -367,29 +442,57 @@ def get_paginated_data(
             if next_page_token:
                 payload["nextPageToken"] = next_page_token
 
-            # Make request
-            response = requests.post(url, auth=auth, headers=headers, json=clean_dict(payload))
-            response.raise_for_status()
+            logger.debug(f"Fetching page {page_num}...")
+
+            # Make request with retry logic for rate limiting
+            max_retries = 5
+            base_delay = 1
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(url, auth=auth, headers=headers, json=clean_dict(payload))
+                    
+                    # Handle rate limiting
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", base_delay * (2 ** attempt)))
+                        logger.warning(f"⚠️  Rate limited (429) on page {page_num}, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_after)
+                        continue
+                    
+                    response.raise_for_status()
+                    break  # Success, exit retry loop
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429 and attempt < max_retries - 1:
+                        retry_after = int(e.response.headers.get("Retry-After", base_delay * (2 ** attempt)))
+                        logger.warning(f"⚠️  Rate limited (429) on page {page_num}, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_after)
+                        continue
+                    else:
+                        raise  # Re-raise if not rate limit or out of retries
+            
             data = response.json()
+            
+            # Small delay between pages to avoid hitting rate limits
+            time.sleep(0.2)
 
             # Extract and yield issues
             issues = data.get("issues") or []
             if not issues:
-                logger.info(f"Page {page_num}: No issues returned, stopping pagination")
+                logger.info(f"✅ Page {page_num}: No issues returned, stopping pagination")
                 break
 
-            logger.info(f"Page {page_num}: Fetched {len(issues)} issues")
+            total_fetched += len(issues)
+            logger.info(f"✅ Page {page_num}: Fetched {len(issues)} issues (total: {total_fetched})")
             yield issues
 
             # Check if this is the last page
             if data.get("isLast", False):
-                logger.info(f"Page {page_num}: isLast=true, stopping pagination")
+                logger.info(f"✅ Completed: Fetched all {total_fetched} issues")
                 break
 
             # Get token for next page
             next_page_token = data.get("nextPageToken")
             if not next_page_token:
-                logger.info(f"Page {page_num}: No nextPageToken, stopping pagination")
+                logger.info(f"✅ Completed: Fetched all {total_fetched} issues (no more pages)")
                 break
 
     else:

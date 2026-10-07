@@ -49,14 +49,28 @@ See `make help` for full command list.
 
 ## Tech Stack
 
-- **Storage**: DuckDB
+- **Storage**: Motherduck (DuckDB in the cloud)
 - **Transformation**: dbt (10 gold models)
-- **Visualization**: Evidence.dev (markdown + SQL)
+- **Visualization**: 
+  - Evidence.dev (markdown + SQL) - See `dashboards/`
+  - Apache Superset (Docker) - See `superset/` for setup
+
+## Dashboards
+
+### Evidence.dev Dashboard
+- Quick start: `make dashboard` → http://localhost:3000
+- See `dashboards/SETUP.md` for details
+
+### Apache Superset Dashboard
+- Quick start: `make superset-up && make superset-init` → http://localhost:8088
+- See `superset/SETUP.md` for detailed setup
+- Replicates Evidence dashboards with drill-down capabilities
 
 ## Documentation
 
 - **FINAL_SOLUTION.md** - Complete architecture
-- **EVIDENCE_SETUP.md** - Dashboard guide
+- **dashboards/SETUP.md** - Evidence dashboard guide
+- **superset/SETUP.md** - Superset setup guide
 - **Makefile** - All commands (run `make help`)
 
 ---
