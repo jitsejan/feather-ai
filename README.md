@@ -83,3 +83,7 @@ uv run dagster job execute -f orchestration/definitions.py -j confluence_dlt_dbt
 Optional env vars:
 - `DAGSTER_DLT_DROP_EXISTING=true` to force raw recrawl
 - `DAGSTER_LOG_LEVEL=DEBUG` for verbose ingestion logs
+
+## Legacy: agile-ai
+
+[`legacy/agile-ai/`](legacy/agile-ai/) contains the former [agile-ai](https://github.com/jitsejan/agile-ai) repo (Jira analytics with dlt, dbt, Evidence and Superset), merged in with its full git history. Run `git log -- legacy/agile-ai` to browse it. The original repo is archived.
