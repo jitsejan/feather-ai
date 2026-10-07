@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: jira
+    schema: raw
+    tables:
+      - name: issues
+      - name: all_sprints
+      - name: issue_comments
+      - name: issue_histories

@@ -1,0 +1,38 @@
+# Jira instances keyed by a short identifier.
+[jira.instances.company_a]
+base_url = "https://company-a.atlassian.net"
+project_key = "PROJECT_A"
+board_ids = [70]  # Only fetch sprints from specified board IDs (optional, leave empty [] to fetch all)
+email_env = "COMPANY_A_JIRA_EMAIL"
+token_env = "COMPANY_A_JIRA_TOKEN"
+
+[jira.instances.company_b]
+base_url = "https://company-b.atlassian.net"
+project_key = "PROJECT_B"
+board_ids = []  # Specify board IDs if needed, or leave empty to fetch all boards
+email_env = "COMPANY_B_JIRA_EMAIL"
+token_env = "COMPANY_B_JIRA_TOKEN"
+
+# Azure DevOps organisations/projects of interest.
+[azure_devops.instances.company_a]
+org = "company-a"
+project = "data-platform"
+repos = ["data-platform-extraction", "data-platform-classification"]
+token_env = "COMPANY_A_ADO_PAT"
+
+# GitHub org placeholder for company B (future use).
+[github.instances.company_b]
+org = "company-b-org"
+repos = ["techint-velocity-reports"]
+token_env = "COMPANY_B_GITHUB_PAT"
+
+# Companies tie together which integrations to run.
+[companies.company_a]
+jira_instances = ["company_a"]
+azure_devops_instances = ["company_a"]
+github_instances = []
+
+[companies.company_b]
+jira_instances = ["company_b"]
+azure_devops_instances = []
+github_instances = ["company_b"]

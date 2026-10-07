@@ -1,0 +1,7 @@
+jira_duckdb:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "md:agile_ai_db?motherduck_token={{ env_var('MOTHERDUCK_TOKEN') }}"
+      threads: 1
