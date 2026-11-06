@@ -11,3 +11,10 @@
 # password             = "YOUR_ATLASSIAN_API_TOKEN"
 # confluence_space_key = "ENG"
 # jira_board_id        = 42
+#
+# Jira on a separate host (e.g. Jira Server/DC behind SSO):
+#
+# [projects.otherco]
+# jira_base_url        = "https://jira.otherco.com"
+# jira_board_id        = 123
+# jira_pat             = "YOUR_JIRA_PERSONAL_ACCESS_TOKEN"  # sent as Bearer token

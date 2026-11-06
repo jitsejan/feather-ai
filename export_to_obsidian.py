@@ -333,7 +333,7 @@ def clean_jira_body(text: str, confluence_page_map: dict, jira_base_url: str, co
 
 
 def export_jira(con, project: ProjectConfig, vault_path: str, obsidian_vault: str, my_name: str):
-    if not project.base_url or not project.jira_board_id:
+    if not project.jira_base_url or not project.jira_board_id:
         return
     dataset = project.jira_dataset
     folder = os.path.join(obsidian_vault, vault_path, "jira")
@@ -427,7 +427,7 @@ def export_jira(con, project: ProjectConfig, vault_path: str, obsidian_vault: st
             # Description
             if description:
                 f.write("## Description\n\n")
-                f.write(clean_jira_body(description, confluence_page_map, project.base_url, project.base_url))
+                f.write(clean_jira_body(description, confluence_page_map, project.jira_base_url, project.base_url))
                 f.write("\n\n")
 
             # Comments (full history)
@@ -435,7 +435,7 @@ def export_jira(con, project: ProjectConfig, vault_path: str, obsidian_vault: st
                 f.write("## Comments\n\n")
                 for author, body, created_dt in comments:
                     f.write(f"### {author} — {created_dt.strftime('%Y-%m-%d %H:%M') if hasattr(created_dt, 'strftime') else created_dt}\n\n")
-                    f.write(clean_jira_body(body, confluence_page_map, project.base_url, project.base_url))
+                    f.write(clean_jira_body(body, confluence_page_map, project.jira_base_url, project.base_url))
                     f.write("\n\n")
 
     print(f"  jira: {len(issues)} issues written")
@@ -577,7 +577,7 @@ def generate_weekly_note(con, projects: list, obsidian_vault: str, my_name: str,
 
         # Jira — active sprint tickets assigned to me (exclude Done)
         for pd in project_data:
-            base_url = next((p.base_url for p in projects if p.name == pd["name"]), "") or ""
+            base_url = next((p.jira_base_url for p in projects if p.name == pd["name"]), "") or ""
             my_active = [
                 r for r in pd["issues"]
                 if r[3] == my_name and r[2] not in ("Done", "Closed", "Resolved")
