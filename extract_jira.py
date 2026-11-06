@@ -4,7 +4,7 @@ import re
 from html import unescape
 
 from dlt.sources.helpers.rest_client import RESTClient
-from dlt.sources.helpers.rest_client.auth import HttpBasicAuth
+from dlt.sources.helpers.rest_client.auth import AuthConfigBase, BearerTokenAuth, HttpBasicAuth
 from dlt.sources.helpers.rest_client.paginators import OffsetPaginator
 
 logger = logging.getLogger(__name__)
@@ -82,13 +82,31 @@ def build_issue_record(issue: dict) -> dict:
     }
 
 
+def jira_auth(
+    username: str | None = None,
+    password: str | None = None,
+    pat: str | None = None,
+) -> AuthConfigBase:
+    """Bearer auth for a personal access token (Jira Server/DC), else basic auth (Cloud)."""
+    if pat:
+        return BearerTokenAuth(pat)
+    if not (username and password):
+        raise ValueError("Jira credentials missing: set jira_pat or username/password")
+    return HttpBasicAuth(username, password)
+
+
 @dlt.resource(name="issues", write_disposition="replace", primary_key="id")
-def _jira_issues(base_url: str, board_id: int, fields: str):
-    username = dlt.secrets["sources.atlassian_confluence.username"]
-    password = dlt.secrets["sources.atlassian_confluence.password"]
+def _jira_issues(
+    base_url: str,
+    board_id: int,
+    fields: str,
+    username: str | None = None,
+    password: str | None = None,
+    pat: str | None = None,
+):
     client = RESTClient(
-        base_url=f"{base_url}/rest/agile/1.0",
-        auth=HttpBasicAuth(username, password),
+        base_url=f"{base_url.rstrip('/')}/rest/agile/1.0",
+        auth=jira_auth(username=username, password=password, pat=pat),
         paginator=OffsetPaginator(
             limit=ISSUE_LIMIT,
             offset_param="startAt",
@@ -116,8 +134,15 @@ def process_issues(issue: dict):
 
 
 @dlt.source
-def jira_source(base_url=None, board_id=None, fields=None):
+def jira_source(base_url=None, board_id=None, fields=None, username=None, password=None, pat=None):
+    """Jira board issues. Pass `pat` for Server/DC bearer auth, else basic auth is used.
+
+    Without explicit credentials, falls back to the legacy [sources.atlassian_confluence] secrets.
+    """
     base_url = base_url or dlt.secrets["sources.atlassian_confluence.base_url"]
     board_id = board_id or dlt.config["sources.jira.board_id"]
     fields = fields or dlt.config.get("sources.jira.fields", ISSUE_FIELDS)
-    yield _jira_issues(base_url, board_id, fields)
+    if not pat and not (username and password):
+        username = dlt.secrets["sources.atlassian_confluence.username"]
+        password = dlt.secrets["sources.atlassian_confluence.password"]
+    yield _jira_issues(base_url, board_id, fields, username, password, pat)

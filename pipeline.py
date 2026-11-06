@@ -173,20 +173,24 @@ def run_confluence(project: ProjectConfig, drop_existing: bool = False, local: b
 @dlt.source
 def _jira_processed(project: ProjectConfig):
     issues = jira_source(
-        base_url=project.base_url,
+        base_url=project.jira_base_url,
         board_id=project.jira_board_id,
+        username=project.jira_username,
+        password=project.jira_password,
+        pat=project.jira_pat,
     ).issues
     return issues | process_issues
 
 
 def run_jira(project: ProjectConfig, drop_existing: bool = False, local: bool = False) -> None:
-    if not project.base_url or not project.jira_board_id:
+    if not project.has_jira:
         logger.info("[%s/jira] No config — skipping", project.name)
         return
-    logger.info("[%s/jira] Starting ingestion (board: %s)", project.name, project.jira_board_id)
-    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__USERNAME"] = project.username
-    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__PASSWORD"] = project.password
-    os.environ["SOURCES__ATLASSIAN_CONFLUENCE__BASE_URL"] = project.base_url
+    logger.info(
+        "[%s/jira] Starting ingestion (board: %s, host: %s, auth: %s)",
+        project.name, project.jira_board_id, project.jira_base_url,
+        "pat" if project.jira_pat else "basic",
+    )
     refresh = "drop_resources" if drop_existing else None
     pipeline = dlt.pipeline(
         pipeline_name=f"{project.name}_jira",

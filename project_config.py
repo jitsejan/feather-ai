@@ -16,6 +16,12 @@ secrets.toml structure:
     jira_board_id        = 42
     # confluence_expand  = "body.storage,space,metadata.labels,ancestors,version"
 
+    # Separate Jira instance (optional — each falls back to the values above)
+    # jira_base_url      = "https://jira.example.com"
+    # jira_username      = "me@example.com"
+    # jira_password      = "API_TOKEN"
+    # jira_pat           = "PERSONAL_ACCESS_TOKEN"  # Server/DC + SSO: bearer auth, wins over basic
+
     # Azure DevOps wiki (optional — omit if not using ADO)
     # ado_org_url              = "https://dev.azure.com/your-org"
     # ado_project              = "your-project"
@@ -50,6 +56,11 @@ class ProjectConfig:
     confluence_space_key: str | None = field(default=None)
     jira_board_id: int | None = field(default=None)
     confluence_expand: str = field(default=DEFAULT_EXPAND)
+    # Jira overrides — for a Jira instance separate from Confluence (e.g. Server/DC)
+    jira_base_url_override: str | None = field(default=None)
+    jira_username_override: str | None = field(default=None)
+    jira_password_override: str | None = field(default=None)
+    jira_pat: str | None = field(default=None)
     # Azure DevOps wiki — all optional
     ado_org_url: str | None = field(default=None)
     ado_project: str | None = field(default=None)
@@ -75,6 +86,25 @@ class ProjectConfig:
     def has_ado_boards(self) -> bool:
         """True when the minimum ADO boards config is present."""
         return bool(self.ado_org_url and self.ado_boards_project and self.ado_boards_team and self.ado_pat)
+
+    @property
+    def jira_base_url(self) -> str | None:
+        url = self.jira_base_url_override or self.base_url
+        return url.rstrip("/") if url else None
+
+    @property
+    def jira_username(self) -> str | None:
+        return self.jira_username_override or self.username
+
+    @property
+    def jira_password(self) -> str | None:
+        return self.jira_password_override or self.password
+
+    @property
+    def has_jira(self) -> bool:
+        """True when a Jira URL, board and some form of credentials are present."""
+        has_auth = bool(self.jira_pat or (self.jira_username and self.jira_password))
+        return bool(self.jira_base_url and self.jira_board_id and has_auth)
 
     @property
     def confluence_dataset(self) -> str:
@@ -119,6 +149,10 @@ def load_project(name: str) -> ProjectConfig:
         confluence_space_key=secrets.get("confluence_space_key"),
         jira_board_id=int(jira_board_id) if jira_board_id is not None else None,
         confluence_expand=secrets.get("confluence_expand", DEFAULT_EXPAND),
+        jira_base_url_override=secrets.get("jira_base_url"),
+        jira_username_override=secrets.get("jira_username"),
+        jira_password_override=secrets.get("jira_password"),
+        jira_pat=secrets.get("jira_pat"),
         ado_org_url=secrets.get("ado_org_url"),
         ado_project=secrets.get("ado_project"),
         ado_wiki_name=secrets.get("ado_wiki_name"),
